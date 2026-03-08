@@ -2,7 +2,8 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "marimo",
-#     "transformers",
+#     "tokenizers",
+#     "huggingface_hub",
 # ]
 # ///
 
@@ -36,12 +37,11 @@ def _(mo):
 
 @app.cell
 def _():
-    from transformers import AutoTokenizer
+    from tokenizers import Tokenizer
+    from huggingface_hub import hf_hub_download
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        "deepseek-ai/DeepSeek-V3",
-        trust_remote_code=True,
-    )
+    _path = hf_hub_download("deepseek-ai/DeepSeek-V3", "tokenizer.json")
+    tokenizer = Tokenizer.from_file(_path)
     return (tokenizer,)
 
 
@@ -60,8 +60,10 @@ def _(mo):
 @app.cell
 def _(sample_text, tokenizer, mo):
     _input_text = sample_text.value
-    encoding = tokenizer.encode(_input_text)
-    tokens = [tokenizer.decode([tid]) for tid in encoding]
+    _enc = tokenizer.encode(_input_text)
+    encoding = _enc.ids
+    # Display tokens with Ġ (space marker) replaced for readability
+    tokens = [t.replace("Ġ", "·") for t in _enc.tokens]
 
     # Build a colored token display
     colors = [
@@ -72,7 +74,7 @@ def _(sample_text, tokenizer, mo):
     colored = " ".join(
         f'<span style="background:{colors[i % len(colors)]};'
         f'padding:2px 4px;border-radius:3px;margin:1px;'
-        f'display:inline-block;font-family:monospace">{repr(t)}</span>'
+        f'display:inline-block;font-family:monospace">{t}</span>'
         for i, t in enumerate(tokens)
     )
 
@@ -83,6 +85,8 @@ def _(sample_text, tokenizer, mo):
         {colored}
 
         Characters: **{len(_input_text)}** → Tokens: **{len(encoding)}** (compression: **{len(_input_text)/len(encoding):.1f}x**)
+
+        *The `·` marks a leading space — spaces are part of the token, not separate.*
         """
     )
     return (encoding, tokens)
@@ -92,7 +96,7 @@ def _(sample_text, tokenizer, mo):
 def _(encoding, tokens, tokenizer, mo):
     # Token ID table
     _detail_rows = [
-        f"| {i} | `{repr(t)}` | {tid} |"
+        f"| {i} | `{t}` | {tid} |"
         for i, (t, tid) in enumerate(zip(tokens, encoding))
     ]
     _detail_table = "\n".join(_detail_rows)
@@ -106,7 +110,7 @@ def _(encoding, tokens, tokenizer, mo):
         {_detail_table}
 
         Each token maps to an integer ID — this is what the model actually sees.
-        The vocabulary has **{tokenizer.vocab_size:,}** entries.
+        The vocabulary has **{tokenizer.get_vocab_size():,}** entries.
         """
     )
     return
@@ -135,13 +139,14 @@ def _(tokenizer, mo):
 
     _cmp_rows = []
     for label, ex_text in examples:
-        toks = tokenizer.encode(ex_text)
-        ratio = len(ex_text) / len(toks) if toks else 0
-        tok_strs = [repr(tokenizer.decode([t])) for t in toks]
-        preview = " ".join(tok_strs[:8])
-        if len(tok_strs) > 8:
+        _ex_enc = tokenizer.encode(ex_text)
+        n_toks = len(_ex_enc.ids)
+        ratio = len(ex_text) / n_toks if n_toks else 0
+        tok_strs = [t.replace("Ġ", "·") for t in _ex_enc.tokens[:8]]
+        preview = " ".join(f"`{t}`" for t in tok_strs)
+        if len(_ex_enc.tokens) > 8:
             preview += " ..."
-        _cmp_rows.append(f"| {label} | {len(ex_text)} chars | {len(toks)} tokens | {ratio:.1f}x | {preview} |")
+        _cmp_rows.append(f"| {label} | {len(ex_text)} chars | {n_toks} tokens | {ratio:.1f}x | {preview} |")
 
     _cmp_table = "\n".join(_cmp_rows)
 
