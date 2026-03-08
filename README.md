@@ -8,6 +8,7 @@ No proprietary content — this repo is public.
 | Notebook | Path | What it covers |
 |----------|------|----------------|
 | [tokenizer_demo.py](tokenizer_demo.py) | `/tokenizer` | DeepSeek's BPE tokenizer — see how LLMs break text into tokens |
+| [embedding_demo.py](embedding_demo.py) | `/embeddings` | GloVe word vectors — cosine similarity and vector arithmetic |
 
 ## Running locally
 

@@ -12,8 +12,7 @@ import uvicorn
 server = (
     marimo.create_asgi_app()
     .with_app(path="/tokenizer", root="/app/notebooks/tokenizer_demo.py")
-    # Add more notebooks here:
-    # .with_app(path="/embeddings", root="/app/notebooks/embeddings_demo.py")
+    .with_app(path="/embeddings", root="/app/notebooks/embedding_demo.py")
 )
 
 app = FastAPI()
