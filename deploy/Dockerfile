@@ -6,9 +6,10 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     marimo \
     transformers \
-    torch --index-url https://download.pytorch.org/whl/cpu \
     fastapi \
-    uvicorn
+    uvicorn && \
+    pip install --no-cache-dir \
+    torch --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Pre-download the DeepSeek tokenizer so startup is instant
 RUN python -c "from transformers import AutoTokenizer; \
