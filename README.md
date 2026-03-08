@@ -7,7 +7,7 @@ No proprietary content — this repo is public.
 
 | Notebook | Run in browser | What it covers |
 |----------|---------------|----------------|
-| [tokenizer_demo.py](tokenizer_demo.py) | [Open in marimo playground](https://marimo.app/l/run?url=https://raw.githubusercontent.com/hepzibah-ai/demos/main/tokenizer_demo.py) | Build a BPE tokenizer from scratch, see how DeepSeek's tokenizer works under the hood |
+| [tokenizer_demo.py](tokenizer_demo.py) | [Open in marimo playground](https://molab.marimo.io/github/hepzibah-ai/demos/blob/main/tokenizer_demo.py/wasm) | Build a BPE tokenizer from scratch, see how DeepSeek's tokenizer works under the hood |
 
 ## Running locally
 
