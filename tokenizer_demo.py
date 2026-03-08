@@ -59,8 +59,8 @@ def _(mo):
 
 @app.cell
 def _(sample_text, tokenizer, mo):
-    text = sample_text.value
-    encoding = tokenizer.encode(text)
+    _input_text = sample_text.value
+    encoding = tokenizer.encode(_input_text)
     tokens = [tokenizer.decode([tid]) for tid in encoding]
 
     # Build a colored token display
@@ -82,20 +82,20 @@ def _(sample_text, tokenizer, mo):
 
         {colored}
 
-        Characters: **{len(text)}** → Tokens: **{len(encoding)}** (compression: **{len(text)/len(encoding):.1f}x**)
+        Characters: **{len(_input_text)}** → Tokens: **{len(encoding)}** (compression: **{len(_input_text)/len(encoding):.1f}x**)
         """
     )
     return (encoding, tokens)
 
 
 @app.cell
-def _(encoding, tokens, mo):
+def _(encoding, tokens, tokenizer, mo):
     # Token ID table
-    rows = [
+    _detail_rows = [
         f"| {i} | `{repr(t)}` | {tid} |"
         for i, (t, tid) in enumerate(zip(tokens, encoding))
     ]
-    table = "\n".join(rows)
+    _detail_table = "\n".join(_detail_rows)
 
     mo.md(
         f"""
@@ -103,7 +103,7 @@ def _(encoding, tokens, mo):
 
         | # | Token | ID |
         |---|-------|----|
-        {table}
+        {_detail_table}
 
         Each token maps to an integer ID — this is what the model actually sees.
         The vocabulary has **{tokenizer.vocab_size:,}** entries.
@@ -133,23 +133,23 @@ def _(tokenizer, mo):
         ("Mixed", "H0 tile uses a 4-bit MAC with int8 accumulator"),
     ]
 
-    rows = []
-    for label, text in examples:
-        toks = tokenizer.encode(text)
-        ratio = len(text) / len(toks) if toks else 0
+    _cmp_rows = []
+    for label, ex_text in examples:
+        toks = tokenizer.encode(ex_text)
+        ratio = len(ex_text) / len(toks) if toks else 0
         tok_strs = [repr(tokenizer.decode([t])) for t in toks]
         preview = " ".join(tok_strs[:8])
         if len(tok_strs) > 8:
             preview += " ..."
-        rows.append(f"| {label} | {len(text)} chars | {len(toks)} tokens | {ratio:.1f}x | {preview} |")
+        _cmp_rows.append(f"| {label} | {len(ex_text)} chars | {len(toks)} tokens | {ratio:.1f}x | {preview} |")
 
-    table = "\n".join(rows)
+    _cmp_table = "\n".join(_cmp_rows)
 
     mo.md(
         f"""
         | Type | Length | Tokens | Ratio | First tokens |
         |------|--------|--------|-------|-------------|
-        {table}
+        {_cmp_table}
         """
     )
     return
