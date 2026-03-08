@@ -62,9 +62,9 @@ def _(word_a, word_b, vectors, mo):
     _wb = word_b.value.strip().lower()
 
     if _wa not in vectors:
-        mo.md(f"**`{_wa}`** is not in the vocabulary. Try another word.")
+        _out = mo.md(f"**`{_wa}`** is not in the vocabulary. Try another word.")
     elif _wb not in vectors:
-        mo.md(f"**`{_wb}`** is not in the vocabulary. Try another word.")
+        _out = mo.md(f"**`{_wb}`** is not in the vocabulary. Try another word.")
     else:
         _sim = vectors.similarity(_wa, _wb)
 
@@ -78,7 +78,7 @@ def _(word_a, word_b, vectors, mo):
         _na_str = ", ".join(f"{w} ({s:.2f})" for w, s in _neighbors_a)
         _nb_str = ", ".join(f"{w} ({s:.2f})" for w, s in _neighbors_b)
 
-        mo.md(
+        _out = mo.md(
             f"""
             ### Cosine similarity: **{_sim:.3f}**
 
@@ -94,7 +94,7 @@ def _(word_a, word_b, vectors, mo):
             **Nearest neighbors of `{_wb}`:** {_nb_str}
             """
         )
-    return
+    _out
 
 
 @app.cell
@@ -127,7 +127,7 @@ def _(arith_a, arith_b, arith_c, vectors, mo):
 
     _missing = [w for w in [_a, _b, _c] if w not in vectors]
     if _missing:
-        mo.md(f"**Not in vocabulary:** {', '.join(f'`{w}`' for w in _missing)}")
+        _out = mo.md(f"**Not in vocabulary:** {', '.join(f'`{w}`' for w in _missing)}")
     else:
         _results = vectors.most_similar(positive=[_a, _c], negative=[_b], topn=5)
         _result_rows = "\n".join(
@@ -135,7 +135,7 @@ def _(arith_a, arith_b, arith_c, vectors, mo):
             for i, (w, s) in enumerate(_results)
         )
 
-        mo.md(
+        _out = mo.md(
             f"""
             ### {_a} − {_b} + {_c} ≈
 
@@ -144,7 +144,7 @@ def _(arith_a, arith_b, arith_c, vectors, mo):
             {_result_rows}
             """
         )
-    return
+    _out
 
 
 @app.cell
@@ -187,7 +187,6 @@ def _(vectors, mo):
         *relatedness*, not *meaning equivalence*.
         """
     )
-    return
 
 
 @app.cell
@@ -220,7 +219,6 @@ def _(vectors, mo):
         Wikipedia + news text.
         """
     )
-    return
 
 
 @app.cell
