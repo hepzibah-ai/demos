@@ -24,6 +24,8 @@ def _(mo):
         [DeepSeek's actual tokenizer](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py)
         so you can see exactly how a production LLM breaks text apart.
 
+        Type anything in the box below, then **click outside it** to update.
+
         The algorithm underneath is
         [Byte Pair Encoding](https://en.wikipedia.org/wiki/Byte_pair_encoding) (BPE):
         start with characters, repeatedly merge the most common pair, stop when you
@@ -48,7 +50,7 @@ def _():
 @app.cell
 def _(mo):
     sample_text = mo.ui.text_area(
-        value="The cat sat on the mat. The cat sat on the hat.",
+        value="The cat in the chartreuse Stetson sat on the mat.",
         label="Enter text to tokenize:",
         full_width=True,
         rows=3,
@@ -122,19 +124,17 @@ def _(tokenizer, mo):
         """
         ## Compare tokenization
 
-        Tokenization efficiency varies dramatically by content type. The examples
-        below show why:
+        The same sentence in three languages — notice how token counts diverge:
         """
     )
 
     examples = [
-        ("English prose", "The quick brown fox jumps over the lazy dog."),
+        ("English", "The cat in the chartreuse Stetson sat on the mat."),
+        ("Mandarin", "那只戴着黄绿色斯泰森帽的猫坐在垫子上。"),
+        ("Japanese", "シャルトルーズのステットソンをかぶった猫がマットの上に座った。"),
         ("Python code", "def fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n-1) + fibonacci(n-2)"),
         ("Rare words", "pneumonoultramicroscopicsilicovolcanoconiosis"),
-        ("Japanese", "東京は日本の首都です。"),
-        ("Repeated chars", "aaaaaaaaaaaaaaaaaaaaaaaaa"),
         ("Numbers", "3.14159265358979323846"),
-        ("Mixed", "H0 tile uses a 4-bit MAC with int8 accumulator"),
     ]
 
     _cmp_rows = []
@@ -159,42 +159,6 @@ def _(tokenizer, mo):
     )
     return
 
-
-@app.cell
-def _(mo):
-    mo.md(
-        """
-        ## Why this matters
-
-        Tokenization determines what the model can "see":
-
-        - **Common English words** become single tokens — efficient
-        - **Rare words** get split into subword pieces — expensive
-        - **Code** tokenizes differently from prose (indentation, operators)
-        - **Non-English text** often tokenizes less efficiently (more tokens per word)
-        - **Numbers** are split digit-by-digit or in small groups — arithmetic is hard
-
-        This explains some otherwise baffling LLM failures:
-        - **Counting letters** in a word is hard because the model doesn't see individual letters
-        - **Anagram puzzles** are nearly impossible for the same reason
-        - **The model is better at English** partly because English gets more efficient tokenization
-
-        ### Try it yourself
-
-        Change the text above and watch the token count change:
-        - Try a long common word vs a short rare one
-        - Try the same sentence in English and another language
-        - Try `"strawberry"` — can you see why letter-counting is hard?
-
-        ### Going deeper
-
-        - [DeepSeek's tokenizer source](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py) —
-          the production code using HuggingFace `transformers`
-        - [nanochat](https://github.com/karpathy/nanochat) tokenizer — builds BPE from scratch,
-          handling unicode, special tokens, and regex pre-splitting
-        """
-    )
-    return
 
 
 @app.cell

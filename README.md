@@ -12,7 +12,7 @@ No proprietary content — this repo is public.
 ## Running locally
 
 ```bash
-pip install marimo transformers torch
+pip install marimo tokenizers huggingface_hub
 marimo run tokenizer_demo.py
 ```
 
@@ -28,7 +28,7 @@ ssh snelgar@172.105.0.10
 cd ~/demos
 
 # Build and run
-docker compose -f deploy/docker-compose.yml up -d
+docker-compose -f deploy/docker-compose.yml up -d
 
 # Test
 curl -I http://localhost:8081/tokenizer
@@ -55,7 +55,7 @@ Caddy auto-provisions a Let's Encrypt cert. Team visits
 
 1. Add a marimo `.py` file to this repo
 2. Add a `.with_app()` line in `deploy/server.py`
-3. Rebuild: `docker compose -f deploy/docker-compose.yml up -d --build`
+3. Rebuild: `docker-compose -f deploy/docker-compose.yml up -d --build`
 
 ### Architecture
 
@@ -64,7 +64,7 @@ Linode 172.105.0.10
 ├── ~/sim0/     → customer demos (port 8080, token-protected)
 └── ~/demos/    → tutorial notebooks (port 8081, behind Caddy auth)
     └── deploy/
-        ├── Dockerfile         # Python + marimo + transformers
+        ├── Dockerfile         # Python + marimo + tokenizers
         ├── server.py          # FastAPI multi-notebook server
         └── docker-compose.yml
 ```
