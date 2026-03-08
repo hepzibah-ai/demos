@@ -1,0 +1,16 @@
+# Run from the demos repo root:
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Tutorials available at http://localhost:8081/tokenizer
+# Customer demos (sim0) managed separately — see sim0/deploy/README.md
+
+services:
+  tutorials:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+    restart: unless-stopped

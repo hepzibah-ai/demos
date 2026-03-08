@@ -2,12 +2,13 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "marimo",
+#     "transformers",
 # ]
 # ///
 
 import marimo
 
-__generated_with = "0.10.0"
+__generated_with = "0.19.9"
 app = marimo.App(width="medium")
 
 
@@ -18,34 +19,30 @@ def _(mo):
         # What's a Token?
 
         LLMs don't see characters or words — they see **tokens**, subword chunks
-        chosen by a tokenizer. This notebook lets you see tokenization in action
-        and understand why it matters.
+        chosen by a tokenizer. This notebook uses
+        [DeepSeek's actual tokenizer](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py)
+        so you can see exactly how a production LLM breaks text apart.
 
-        Production tokenizers (like
-        [DeepSeek's](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py))
-        use the Hugging Face `transformers` library and a pre-trained vocabulary.
-        Under the hood, they all use the same core algorithm:
-        [Byte Pair Encoding](https://en.wikipedia.org/wiki/Byte_pair_encoding) (BPE).
-
-        Below we build BPE from scratch in pure Python so you can see exactly
-        what's happening. The DeepSeek tokenizer does the same thing — just with
-        100K+ merges learned from a massive corpus instead of our toy example.
+        The algorithm underneath is
+        [Byte Pair Encoding](https://en.wikipedia.org/wiki/Byte_pair_encoding) (BPE):
+        start with characters, repeatedly merge the most common pair, stop when you
+        reach your vocabulary size. DeepSeek's tokenizer has ~100K merges learned from
+        a massive training corpus. For the algorithm from scratch, see
+        [nanochat](https://github.com/karpathy/nanochat).
         """
     )
     return
 
 
 @app.cell
-def _(mo):
-    mo.md(
-        """
-        ## Step 1: Start with characters
+def _():
+    from transformers import AutoTokenizer
 
-        The simplest tokenizer splits text into individual characters (really,
-        bytes). Try changing the text below and watch what happens.
-        """
+    tokenizer = AutoTokenizer.from_pretrained(
+        "deepseek-ai/DeepSeek-V3",
+        trust_remote_code=True,
     )
-    return
+    return (tokenizer,)
 
 
 @app.cell
@@ -54,160 +51,105 @@ def _(mo):
         value="The cat sat on the mat. The cat sat on the hat.",
         label="Enter text to tokenize:",
         full_width=True,
+        rows=3,
     )
     sample_text
     return (sample_text,)
 
 
 @app.cell
-def _(sample_text, mo):
-    chars = list(sample_text.value)
+def _(sample_text, tokenizer, mo):
+    text = sample_text.value
+    encoding = tokenizer.encode(text)
+    tokens = [tokenizer.decode([tid]) for tid in encoding]
+
+    # Build a colored token display
+    colors = [
+        "#FFE0B2", "#B3E5FC", "#C8E6C9", "#F8BBD0",
+        "#D1C4E9", "#FFCCBC", "#B2DFDB", "#FFF9C4",
+        "#E1BEE7", "#DCEDC8",
+    ]
+    colored = " ".join(
+        f'<span style="background:{colors[i % len(colors)]};'
+        f'padding:2px 4px;border-radius:3px;margin:1px;'
+        f'display:inline-block;font-family:monospace">{repr(t)}</span>'
+        for i, t in enumerate(tokens)
+    )
+
     mo.md(
         f"""
-        **Character-level tokens**: {len(chars)} tokens
+        ### Tokens: {len(encoding)}
 
-        ```
-        {chars}
-        ```
+        {colored}
 
-        Every character is a separate token. This works, but it's inefficient —
-        the model has to "spend" one token on every single character, and common
-        words like "the" cost 3 tokens each time.
+        Characters: **{len(text)}** → Tokens: **{len(encoding)}** (compression: **{len(text)/len(encoding):.1f}x**)
         """
     )
-    return (chars,)
+    return (encoding, tokens)
 
 
 @app.cell
-def _(mo):
+def _(encoding, tokens, mo):
+    # Token ID table
+    rows = [
+        f"| {i} | `{repr(t)}` | {tid} |"
+        for i, (t, tid) in enumerate(zip(tokens, encoding))
+    ]
+    table = "\n".join(rows)
+
     mo.md(
-        """
-        ## Step 2: Byte Pair Encoding (BPE)
+        f"""
+        ### Token details
 
-        BPE finds the most common *pair* of adjacent tokens and merges them into
-        a single new token. Repeat until you reach a target vocabulary size.
+        | # | Token | ID |
+        |---|-------|----|
+        {table}
 
-        This is how real tokenizers are trained — on a huge corpus, finding the
-        most frequent pairs and merging them one by one.
+        Each token maps to an integer ID — this is what the model actually sees.
+        The vocabulary has **{tokenizer.vocab_size:,}** entries.
         """
     )
     return
 
 
 @app.cell
-def _():
-    from collections import Counter
-
-    def get_pair_counts(token_list):
-        """Count adjacent pairs in a list of tokens."""
-        pairs = Counter()
-        for i in range(len(token_list) - 1):
-            pairs[(token_list[i], token_list[i + 1])] += 1
-        return pairs
-
-    def merge_pair(token_list, pair):
-        """Merge all occurrences of a pair into a single token."""
-        merged = pair[0] + pair[1]
-        result = []
-        i = 0
-        while i < len(token_list):
-            if i < len(token_list) - 1 and token_list[i] == pair[0] and token_list[i + 1] == pair[1]:
-                result.append(merged)
-                i += 2
-            else:
-                result.append(token_list[i])
-                i += 1
-        return result
-
-    def run_bpe(text, num_merges):
-        """Run BPE for a given number of merge steps. Return history."""
-        tokens = list(text)
-        history = [{"step": 0, "pair": None, "count": None, "tokens": list(tokens), "num_tokens": len(tokens)}]
-
-        for step in range(1, num_merges + 1):
-            pairs = get_pair_counts(tokens)
-            if not pairs:
-                break
-            best_pair = pairs.most_common(1)[0]
-            pair, count = best_pair
-            tokens = merge_pair(tokens, pair)
-            history.append({
-                "step": step,
-                "pair": pair,
-                "count": count,
-                "tokens": list(tokens),
-                "num_tokens": len(tokens),
-            })
-
-        return history
-    return run_bpe, get_pair_counts, merge_pair
-
-
-@app.cell
-def _(mo):
-    num_merges = mo.ui.slider(
-        start=0,
-        stop=30,
-        value=10,
-        label="Number of BPE merges:",
-        show_value=True,
-    )
-    num_merges
-    return (num_merges,)
-
-
-@app.cell
-def _(sample_text, num_merges, run_bpe, mo):
-    history = run_bpe(sample_text.value, num_merges.value)
-
-    # Build the merge log
-    merge_rows = []
-    for entry in history:
-        if entry["pair"] is not None:
-            p = entry["pair"]
-            merge_rows.append(
-                f"| {entry['step']} | `{repr(p[0])}` + `{repr(p[1])}` → `{repr(p[0] + p[1])}` | {entry['count']} | {entry['num_tokens']} |"
-            )
-
-    merge_table = "\n".join(merge_rows) if merge_rows else "*(no merges yet — slide right)*"
-
-    final = history[-1]
-    token_display = " | ".join(f"`{t}`" for t in final["tokens"])
-
+def _(tokenizer, mo):
     mo.md(
-        f"""
-        ### Merge history
+        """
+        ## Compare tokenization
 
-        | Step | Merge | Occurrences | Tokens remaining |
-        |------|-------|-------------|-----------------|
-        {merge_table}
-
-        ### Result: {final['num_tokens']} tokens (down from {history[0]['num_tokens']} characters)
-
-        {token_display}
+        Tokenization efficiency varies dramatically by content type. The examples
+        below show why:
         """
     )
-    return (history,)
 
+    examples = [
+        ("English prose", "The quick brown fox jumps over the lazy dog."),
+        ("Python code", "def fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n-1) + fibonacci(n-2)"),
+        ("Rare words", "pneumonoultramicroscopicsilicovolcanoconiosis"),
+        ("Japanese", "東京は日本の首都です。"),
+        ("Repeated chars", "aaaaaaaaaaaaaaaaaaaaaaaaa"),
+        ("Numbers", "3.14159265358979323846"),
+        ("Mixed", "H0 tile uses a 4-bit MAC with int8 accumulator"),
+    ]
 
-@app.cell
-def _(history, mo):
-    # Compression ratio
-    initial = history[0]["num_tokens"]
-    final = history[-1]["num_tokens"]
-    ratio = initial / final if final > 0 else 0
+    rows = []
+    for label, text in examples:
+        toks = tokenizer.encode(text)
+        ratio = len(text) / len(toks) if toks else 0
+        tok_strs = [repr(tokenizer.decode([t])) for t in toks]
+        preview = " ".join(tok_strs[:8])
+        if len(tok_strs) > 8:
+            preview += " ..."
+        rows.append(f"| {label} | {len(text)} chars | {len(toks)} tokens | {ratio:.1f}x | {preview} |")
+
+    table = "\n".join(rows)
 
     mo.md(
         f"""
-        ### Compression
-
-        - Characters: **{initial}**
-        - Tokens after BPE: **{final}**
-        - Compression ratio: **{ratio:.1f}x**
-
-        Real tokenizers run thousands of merges on billions of words. GPT-4's
-        tokenizer has ~100,000 tokens in its vocabulary. The principle is the same
-        — just more merges on more data.
+        | Type | Length | Tokens | Ratio | First tokens |
+        |------|--------|--------|-------|-------------|
+        {table}
         """
     )
     return
@@ -221,33 +163,30 @@ def _(mo):
 
         Tokenization determines what the model can "see":
 
-        - **Common words** become single tokens (efficient — "the" is 1 token, not 3)
-        - **Rare words** get split into pieces ("pneumonoultramicroscopicsilicovolcanoconiosis" → many tokens)
-        - **Code** tokenizes differently from prose (indentation, brackets, operators)
+        - **Common English words** become single tokens — efficient
+        - **Rare words** get split into subword pieces — expensive
+        - **Code** tokenizes differently from prose (indentation, operators)
         - **Non-English text** often tokenizes less efficiently (more tokens per word)
+        - **Numbers** are split digit-by-digit or in small groups — arithmetic is hard
 
         This explains some otherwise baffling LLM failures:
-        - Counting letters in a word is hard because the model doesn't see individual letters
-        - Anagram puzzles are nearly impossible for the same reason
-        - The model is better at English than other languages partly because English
-          gets more efficient tokenization (more merges for common English patterns)
+        - **Counting letters** in a word is hard because the model doesn't see individual letters
+        - **Anagram puzzles** are nearly impossible for the same reason
+        - **The model is better at English** partly because English gets more efficient tokenization
 
         ### Try it yourself
 
-        Change the text above to see how different inputs tokenize:
-        - Try `"hello"` vs `"pneumonia"` — common vs rare words
-        - Try Python code: `"def hello(): return 42"`
-        - Try non-English text and compare token counts
-        - Try `"aaaaaaaaaa"` — what happens with repetition?
+        Change the text above and watch the token count change:
+        - Try a long common word vs a short rare one
+        - Try the same sentence in English and another language
+        - Try `"strawberry"` — can you see why letter-counting is hard?
 
         ### Going deeper
 
-        - [DeepSeek's tokenizer](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py) —
-          a production tokenizer using HuggingFace `transformers`. Same BPE algorithm,
-          but with a vocabulary trained on DeepSeek's full training corpus.
-        - [nanochat](https://github.com/karpathy/nanochat) tokenizer code —
-          builds a production-quality BPE tokenizer from scratch, handling the
-          edge cases we've skipped here (unicode, special tokens, regex pre-splitting).
+        - [DeepSeek's tokenizer source](https://github.com/ser163/deepseek_v3_tokenizer_calc/blob/master/deepseek_tokenizer.py) —
+          the production code using HuggingFace `transformers`
+        - [nanochat](https://github.com/karpathy/nanochat) tokenizer — builds BPE from scratch,
+          handling unicode, special tokens, and regex pre-splitting
         """
     )
     return
