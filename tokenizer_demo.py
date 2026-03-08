@@ -50,10 +50,10 @@ def _():
 @app.cell
 def _(mo):
     sample_text = mo.ui.text_area(
-        value="The cat in the chartreuse Stetson sat on the mat.",
+        value="The cat in the chartreuse Stetson sat on the mat.\n那只戴着黄绿色斯泰森帽的猫坐在垫子上。\nシャルトルーズのステットソンをかぶった猫がマットの上に座った。",
         label="Enter text to tokenize:",
         full_width=True,
-        rows=3,
+        rows=5,
     )
     sample_text
     return (sample_text,)
@@ -61,11 +61,20 @@ def _(mo):
 
 @app.cell
 def _(sample_text, tokenizer, mo):
+    import html as _html
+
     _input_text = sample_text.value
     _enc = tokenizer.encode(_input_text)
     encoding = _enc.ids
-    # Display tokens with Ġ (space marker) replaced for readability
-    tokens = [t.replace("Ġ", "·") for t in _enc.tokens]
+
+    # Decode each token ID back to readable text (byte-level BPE tokens
+    # are unreadable for CJK — this reverses the byte-to-unicode mapping)
+    tokens = []
+    for _tid in encoding:
+        _decoded = tokenizer.decode([_tid])
+        if _decoded.startswith(" "):
+            _decoded = "·" + _decoded[1:]
+        tokens.append(_decoded)
 
     # Build a colored token display
     colors = [
@@ -76,7 +85,7 @@ def _(sample_text, tokenizer, mo):
     colored = " ".join(
         f'<span style="background:{colors[i % len(colors)]};'
         f'padding:2px 4px;border-radius:3px;margin:1px;'
-        f'display:inline-block;font-family:monospace">{t}</span>'
+        f'display:inline-block;font-family:monospace">{_html.escape(t)}</span>'
         for i, t in enumerate(tokens)
     )
 
@@ -142,9 +151,14 @@ def _(tokenizer, mo):
         _ex_enc = tokenizer.encode(ex_text)
         n_toks = len(_ex_enc.ids)
         ratio = len(ex_text) / n_toks if n_toks else 0
-        tok_strs = [t.replace("Ġ", "·") for t in _ex_enc.tokens[:8]]
-        preview = " ".join(f"`{t}`" for t in tok_strs)
-        if len(_ex_enc.tokens) > 8:
+        _tok_strs = []
+        for _tid in _ex_enc.ids[:8]:
+            _d = tokenizer.decode([_tid])
+            if _d.startswith(" "):
+                _d = "·" + _d[1:]
+            _tok_strs.append(_d)
+        preview = " ".join(f"`{t}`" for t in _tok_strs)
+        if len(_ex_enc.ids) > 8:
             preview += " ..."
         _cmp_rows.append(f"| {label} | {len(ex_text)} chars | {n_toks} tokens | {ratio:.1f}x | {preview} |")
 
