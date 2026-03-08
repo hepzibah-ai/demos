@@ -74,6 +74,7 @@ def _(sample_text, tokenizer, mo):
         _decoded = tokenizer.decode([_tid])
         if _decoded.startswith(" "):
             _decoded = "·" + _decoded[1:]
+        _decoded = _decoded.replace("\n", "↵")
         tokens.append(_decoded)
 
     # Build a colored token display
@@ -156,6 +157,7 @@ def _(tokenizer, mo):
             _d = tokenizer.decode([_tid])
             if _d.startswith(" "):
                 _d = "·" + _d[1:]
+            _d = _d.replace("\n", "↵")
             _tok_strs.append(_d)
         preview = " ".join(f"`{t}`" for t in _tok_strs)
         if len(_ex_enc.ids) > 8:
