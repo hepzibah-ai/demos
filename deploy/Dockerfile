@@ -10,6 +10,7 @@ RUN pip install --no-cache-dir \
     gensim \
     numpy \
     matplotlib \
+    plotly \
     fastapi \
     uvicorn
 
