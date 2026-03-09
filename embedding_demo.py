@@ -429,45 +429,82 @@ def _(vectors, mo):
 
 @app.cell
 def _(mo):
-    arith_a = mo.ui.text(value="king", label="A:", full_width=False)
-    arith_b = mo.ui.text(value="man", label="− B:", full_width=False)
-    arith_c = mo.ui.text(value="woman", label="+ C:", full_width=False)
+    arith_expr = mo.ui.text(
+        value="king - man + woman",
+        label="",
+        full_width=True,
+        placeholder="e.g. king - man + woman",
+    )
     mo.vstack([
         mo.md(
             """
-            ## Vector arithmetic
+            ## Vector calculator
 
-            The classic test: **king − man + woman ≈ ?**
+            Type any expression with `+` and `-`. The calculator adds and subtracts
+            the word vectors and finds the nearest words to the result.
 
-            If embeddings capture meaning geometrically, then subtracting "man" from
-            "king" should leave the *royalty* direction, and adding "woman" should
-            land near "queen."
+            Try: `paris - france + japan` · `slow - slower + fast` · `king - man + woman`
             """
         ),
-        mo.hstack([arith_a, arith_b, arith_c], gap=1, justify="start"),
+        arith_expr,
     ])
-    return (arith_a, arith_b, arith_c)
+    return (arith_expr,)
 
 
 @app.cell
-def _(arith_a, arith_b, arith_c, vectors, mo):
-    _a = arith_a.value.strip().lower()
-    _b = arith_b.value.strip().lower()
-    _c = arith_c.value.strip().lower()
+def _(arith_expr, vectors, mo):
+    import numpy as _np
+    import re as _re
 
-    _missing = [w for w in [_a, _b, _c] if w not in vectors]
-    if _missing:
-        _out = mo.md(f"**Not in vocabulary:** {', '.join(f'`{w}`' for w in _missing)}")
+    _expr = arith_expr.value.strip().lower()
+
+    # Parse: split into (+word) and (-word) terms
+    # Tokenize keeping the +/- operators
+    _tokens = _re.findall(r'[+-]?\s*[a-z]+', _expr)
+    _positive = []
+    _negative = []
+    for _tok in _tokens:
+        _tok = _tok.strip()
+        if _tok.startswith("-"):
+            _negative.append(_tok.lstrip("- "))
+        else:
+            _positive.append(_tok.lstrip("+ "))
+
+    _all_words = _positive + _negative
+    _missing = [w for w in _all_words if w and w not in vectors]
+
+    if not _all_words:
+        _out = mo.md("*Type an expression above, e.g.* `king - man + woman`")
+    elif _missing:
+        _out = mo.md(
+            f"**Not in vocabulary:** {', '.join(f'`{w}`' for w in _missing)}")
     else:
-        _results = vectors.most_similar(positive=[_a, _c], negative=[_b], topn=5)
+        # Compute the result vector directly
+        _result_vec = _np.zeros(vectors.vector_size, dtype=float)
+        for _w in _positive:
+            _result_vec += vectors[_w].astype(float)
+        for _w in _negative:
+            _result_vec -= vectors[_w].astype(float)
+
+        # Find nearest words (excluding input words)
+        _candidates = vectors.similar_by_vector(_result_vec, topn=10 + len(_all_words))
+        _results = [(w, s) for w, s in _candidates if w not in _all_words][:8]
+
         _result_rows = "\n".join(
             f"| {i+1} | **{w}** | {s:.3f} |"
             for i, (w, s) in enumerate(_results)
         )
 
+        # Format the expression for display
+        _display = _positive[0] if _positive else ""
+        for _w in _positive[1:]:
+            _display += f" + {_w}"
+        for _w in _negative:
+            _display += f" − {_w}"
+
         _out = mo.md(
             f"""
-            ### {_a} − {_b} + {_c} ≈
+            ### {_display} ≈
 
             | Rank | Word | Similarity |
             |------|------|-----------|
