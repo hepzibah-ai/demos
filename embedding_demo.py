@@ -453,13 +453,11 @@ def _(mo):
 
 @app.cell
 def _(arith_expr, vectors, mo):
-    import numpy as _np
     import re as _re
 
     _expr = arith_expr.value.strip().lower()
 
     # Parse: split into (+word) and (-word) terms
-    # Tokenize keeping the +/- operators
     _tokens = _re.findall(r'[+-]?\s*[a-z]+', _expr)
     _positive = []
     _negative = []
@@ -470,8 +468,8 @@ def _(arith_expr, vectors, mo):
         else:
             _positive.append(_tok.lstrip("+ "))
 
-    _all_words = _positive + _negative
-    _missing = [w for w in _all_words if w and w not in vectors]
+    _all_words = [w for w in _positive + _negative if w]
+    _missing = [w for w in _all_words if w not in vectors]
 
     if not _all_words:
         _out = mo.md("*Type an expression above, e.g.* `king - man + woman`")
@@ -479,16 +477,9 @@ def _(arith_expr, vectors, mo):
         _out = mo.md(
             f"**Not in vocabulary:** {', '.join(f'`{w}`' for w in _missing)}")
     else:
-        # Compute the result vector directly
-        _result_vec = _np.zeros(vectors.vector_size, dtype=float)
-        for _w in _positive:
-            _result_vec += vectors[_w].astype(float)
-        for _w in _negative:
-            _result_vec -= vectors[_w].astype(float)
-
-        # Find nearest words (excluding input words)
-        _candidates = vectors.similar_by_vector(_result_vec, topn=10 + len(_all_words))
-        _results = [(w, s) for w, s in _candidates if w not in _all_words][:8]
+        # Use gensim's most_similar directly — it handles +/- word lists
+        _results = vectors.most_similar(
+            positive=_positive, negative=_negative, topn=8)
 
         _result_rows = "\n".join(
             f"| {i+1} | **{w}** | {s:.3f} |"
