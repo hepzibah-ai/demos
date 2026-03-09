@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir \
     huggingface_hub \
     gensim \
     numpy \
+    matplotlib \
     fastapi \
     uvicorn
 

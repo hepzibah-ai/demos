@@ -4,6 +4,7 @@
 #     "marimo",
 #     "gensim",
 #     "numpy",
+#     "matplotlib",
 # ]
 # ///
 
@@ -58,6 +59,9 @@ def _(mo):
 
 @app.cell
 def _(word_a, word_b, vectors, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+
     _wa = word_a.value.strip().lower()
     _wb = word_b.value.strip().lower()
 
@@ -67,33 +71,81 @@ def _(word_a, word_b, vectors, mo):
         _out = mo.md(f"**`{_wb}`** is not in the vocabulary. Try another word.")
     else:
         _sim = vectors.similarity(_wa, _wb)
+        _norm_a = float(_np.linalg.norm(vectors[_wa]))
+        _norm_b = float(_np.linalg.norm(vectors[_wb]))
+        _theta = float(_np.arccos(_np.clip(_sim, -1, 1)))
 
-        # Show the similarity score with a visual bar
-        _bar_width = max(0, _sim) * 100
-        _bar_color = "#4CAF50" if _sim > 0.5 else "#FF9800" if _sim > 0.2 else "#F44336"
+        # --- Vector diagram ---
+        # Word A along y-axis, Word B rotated clockwise by theta
+        _ax = _norm_a * _np.array([0, 1])
+        _bx = _norm_b * _np.array([_np.sin(_theta), _np.cos(_theta)])
 
-        # Find nearest neighbors of each word
+        _fig, _plot = _plt.subplots(figsize=(4, 4))
+        _plot.set_aspect("equal")
+
+        # Draw vectors as arrows from origin
+        _plot.annotate("", xy=_ax, xytext=(0, 0),
+            arrowprops=dict(arrowstyle="->,head_width=0.3,head_length=0.2",
+                            color="#E53935", lw=2.5))
+        _plot.annotate("", xy=_bx, xytext=(0, 0),
+            arrowprops=dict(arrowstyle="->,head_width=0.3,head_length=0.2",
+                            color="#1E88E5", lw=2.5))
+
+        # Draw arc showing the angle
+        _arc_r = min(_norm_a, _norm_b) * 0.35
+        _arc_pts = _np.linspace(0, _theta, 40)
+        _plot.plot(_arc_r * _np.sin(_arc_pts), _arc_r * _np.cos(_arc_pts),
+                   color="#666", lw=1.2)
+
+        # Label the angle
+        _mid = _theta / 2
+        _label_r = _arc_r * 1.5
+        _plot.text(_label_r * _np.sin(_mid), _label_r * _np.cos(_mid),
+                   f"{_np.degrees(_theta):.0f}°", ha="center", va="center",
+                   fontsize=11, color="#333")
+
+        # Label the vectors
+        _plot.text(-0.15 * max(_norm_a, _norm_b), _norm_a * 0.55,
+                   f"{_wa}\n‖{_norm_a:.1f}‖", ha="right", va="center",
+                   fontsize=11, fontweight="bold", color="#E53935")
+        _plot.text(_bx[0] + 0.1 * max(_norm_a, _norm_b), _bx[1] * 0.85,
+                   f"{_wb}\n‖{_norm_b:.1f}‖", ha="left", va="center",
+                   fontsize=11, fontweight="bold", color="#1E88E5")
+
+        # Clean up axes
+        _margin = max(_norm_a, _norm_b) * 0.3
+        _extent = max(_norm_a, _norm_b) + _margin
+        _plot.set_xlim(-_margin, _extent)
+        _plot.set_ylim(-_margin * 0.5, _extent)
+        _plot.spines["top"].set_visible(False)
+        _plot.spines["right"].set_visible(False)
+        _plot.spines["bottom"].set_visible(False)
+        _plot.spines["left"].set_visible(False)
+        _plot.set_xticks([])
+        _plot.set_yticks([])
+        _plt.tight_layout()
+        _plt.close(_fig)
+
+        # Find nearest neighbors
         _neighbors_a = vectors.most_similar(_wa, topn=5)
         _neighbors_b = vectors.most_similar(_wb, topn=5)
         _na_str = ", ".join(f"{w} ({s:.2f})" for w, s in _neighbors_a)
         _nb_str = ", ".join(f"{w} ({s:.2f})" for w, s in _neighbors_b)
 
-        _out = mo.md(
+        _text = mo.md(
             f"""
-            ### Cosine similarity: **{_sim:.3f}**
+            ### Cosine similarity: **{_sim:.3f}** — angle: **{_np.degrees(_theta):.0f}°**
 
-            <div style="background:#eee;border-radius:4px;height:24px;width:100%;max-width:400px">
-            <div style="background:{_bar_color};border-radius:4px;height:24px;width:{_bar_width}%"></div>
-            </div>
-
-            Each word is a 50-dimensional vector. Cosine similarity measures the angle
-            between them: 1.0 = identical direction, 0.0 = unrelated, −1.0 = opposite.
+            The vectors live in 50 dimensions; the angle between them is real.
+            Cosine similarity = cos(angle), so 1.0 = same direction (0°),
+            0.0 = perpendicular (90°), −1.0 = opposite (180°).
 
             **Nearest neighbors of `{_wa}`:** {_na_str}
 
             **Nearest neighbors of `{_wb}`:** {_nb_str}
             """
         )
+        _out = mo.hstack([_fig, _text], widths=[0.35, 0.65], align="start")
     _out
 
 
