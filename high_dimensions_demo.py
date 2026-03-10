@@ -840,6 +840,114 @@ def _(dim_slider_nn, vectors, mo):
     ])
 
 
+# ── §9  Scaling up: what does 7168 dimensions look like? ─────────────
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Scaling up: what does 7,168 dimensions look like?
+
+    Everything above used GloVe at 50 dimensions. Real LLMs are much
+    bigger — DeepSeek-V3 embeds tokens in **7,168 dimensions**, split
+    across 128 attention heads of 56 dimensions each.
+
+    A natural question: does the geometry behave like a 7,168-dimensional
+    sphere, or like 128 independent 56-dimensional spheres? The answer
+    matters — it tells you what "dimension" means for concentration of
+    measure, distance collapse, and ultimately for how the hardware
+    processes these vectors.
+
+    We sampled 5,000 token embeddings from DeepSeek-V3's actual embedding
+    table and compared the pairwise cosine distribution against two random
+    models:
+    - **Random S^7167**: unit vectors on the full 7,168-dim sphere
+    - **128 × S^55**: 128 independent 56-dim unit vectors concatenated
+      and normalized (the "independent heads" model)
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    import os as _os
+
+    # Load precomputed histograms (4 KB file)
+    _data_path = _os.path.join(_os.path.dirname(__file__) or ".",
+                               "data", "deepseek_v3_cosine_stats.npz")
+    _data = _np.load(_data_path)
+    _bins = _data['bins']
+    _bin_centers = (_bins[:-1] + _bins[1:]) / 2
+    _hist_real = _data['hist_real']
+    _hist_A = _data['hist_A']
+    _hist_B = _data['hist_B']
+
+    _real_std = float(_data['real_std'])
+    _real_max = float(_data['real_max'])
+    _A_std = float(_data['A_std'])
+    _B_std = float(_data['B_std'])
+
+    _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(12, 4))
+
+    # Left: the two random models overlaid
+    _width = _bins[1] - _bins[0]
+    _ax1.bar(_bin_centers, _hist_A, width=_width, color="#1E88E5", alpha=0.6,
+             label=f"Random S$^{{7167}}$ (σ={_A_std:.4f})")
+    _ax1.bar(_bin_centers, _hist_B, width=_width, color="#FF9800", alpha=0.4,
+             label=f"128 × S$^{{55}}$ concat (σ={_B_std:.4f})")
+    _ax1.set_xlabel("Cosine similarity", fontsize=10)
+    _ax1.set_ylabel("Density", fontsize=10)
+    _ax1.set_title("Two random models — indistinguishable", fontsize=11)
+    _ax1.set_xlim(-0.15, 0.15)
+    _ax1.legend(fontsize=8)
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+
+    # Right: real vs random
+    _ax2.bar(_bin_centers, _hist_A, width=_width, color="#1E88E5", alpha=0.5,
+             label=f"Random S$^{{7167}}$ (σ={_A_std:.4f})")
+    _ax2.bar(_bin_centers, _hist_real, width=_width, color="#E53935", alpha=0.5,
+             label=f"DeepSeek-V3 (σ={_real_std:.4f})")
+    _ax2.set_xlabel("Cosine similarity", fontsize=10)
+    _ax2.set_title("Real embeddings vs random", fontsize=11)
+    _ax2.set_xlim(-0.15, 0.6)
+    _ax2.legend(fontsize=8)
+    _ax2.spines["top"].set_visible(False)
+    _ax2.spines["right"].set_visible(False)
+
+    _plt.tight_layout()
+    _plt.close(_fig)
+
+    mo.vstack([
+        _fig,
+        mo.md(f"""
+        **Left**: the two random models are indistinguishable. Concatenating
+        128 independent 56-dim spheres and normalizing gives the same
+        cosine distribution as a single 7,168-dim sphere (both σ={_A_std:.4f}).
+        The multi-head structure doesn't exist in the input embeddings —
+        the head decomposition only happens later, when attention computes
+        separate Q, K, V projections.
+
+        **Right**: DeepSeek-V3's real embeddings are **{_real_std/_A_std:.1f}×
+        wider** (σ={_real_std:.4f}) with a long right tail reaching
+        {_real_max:.2f}. That extra width is the learned structure — tokens
+        with related meanings have genuinely higher cosine similarity.
+
+        The takeaway: when someone says "7,168 dimensions," ask what they
+        mean. The *ambient* dimension is 7,168. The concentration-of-measure
+        predictions for that dimension are a useful baseline. But the real
+        data has structure that no random model captures — and once attention
+        slices it into 128 heads of 56 dimensions each, the effective
+        geometry changes again.
+
+        Simple models are a starting point, not the answer. But without
+        them you can't see what the data is doing differently.
+        """),
+    ])
+
+
 # ── Closing ──────────────────────────────────────────────────────────
 
 
@@ -860,8 +968,11 @@ def _(mo):
        activations. Most coordinates are near zero for any given input.
     5. **Heavy tails are real**: GloVe coordinates are not Gaussian. The
        gap between the Gaussian model and reality is exactly where
-       quantization gets interesting — which is where we go
-       [next](/dot-product).
+       quantization gets interesting.
+    6. **"Dimension" needs thought**: 7,168 ambient dimensions, 128 heads
+       of 56 dimensions, and the intrinsic dimensionality of the learned
+       structure are three different numbers. Simple random models are
+       useful baselines, not the full story.
 
     For depth: Hamming ch. 9 covers the geometry;
     [Anthropic's "Toy Models of Superposition"](https://transformer-circuits.pub/2022/toy_model/index.html)
