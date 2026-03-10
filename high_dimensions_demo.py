@@ -63,50 +63,43 @@ def _(vectors, mo):
     _words = ["cat", "dog", "king", "queen", "paris", "france"]
     _words = [w for w in _words if w in vectors]
 
-    # One-hot: show the grid
     _n = len(_words)
+
+    # One-hot cosine similarities (0 for all off-diagonal, 1 on diagonal)
     _onehot = _np.eye(_n)
+    _oh_cos = _onehot @ _onehot.T  # identity matrix
 
-    # One-hot pairwise distances (all √2 except diagonal)
-    _oh_dists = _np.zeros((_n, _n))
-    for _i in range(_n):
-        for _j in range(_n):
-            _oh_dists[_i, _j] = _np.linalg.norm(_onehot[_i] - _onehot[_j])
-
-    # GloVe pairwise distances
-    _glove_dists = _np.zeros((_n, _n))
-    for _i in range(_n):
-        for _j in range(_n):
-            _glove_dists[_i, _j] = _np.linalg.norm(
-                vectors[_words[_i]] - vectors[_words[_j]])
+    # GloVe cosine similarities
+    _glove_vecs = _np.array([vectors[w] for w in _words], dtype=float)
+    _glove_norms = _np.linalg.norm(_glove_vecs, axis=1, keepdims=True)
+    _glove_unit = _glove_vecs / _glove_norms
+    _glove_cos = _glove_unit @ _glove_unit.T
 
     _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(10, 4))
 
-    _im1 = _ax1.imshow(_oh_dists, cmap="YlOrRd", vmin=0,
-                        vmax=max(_oh_dists.max(), _glove_dists.max()))
+    _im1 = _ax1.imshow(_oh_cos, cmap="RdYlGn", vmin=-1, vmax=1)
     _ax1.set_xticks(range(_n))
     _ax1.set_xticklabels(_words, rotation=45, ha="right", fontsize=9)
     _ax1.set_yticks(range(_n))
     _ax1.set_yticklabels(_words, fontsize=9)
-    _ax1.set_title("One-hot distances", fontsize=11)
+    _ax1.set_title("One-hot cosine similarity", fontsize=11)
     for _i in range(_n):
         for _j in range(_n):
-            _ax1.text(_j, _i, f"{_oh_dists[_i,_j]:.1f}", ha="center",
+            _ax1.text(_j, _i, f"{_oh_cos[_i,_j]:.1f}", ha="center",
                       va="center", fontsize=8,
-                      color="white" if _oh_dists[_i,_j] > 1.0 else "black")
+                      color="white" if abs(_oh_cos[_i,_j]) < 0.3 else "black")
 
-    _im2 = _ax2.imshow(_glove_dists, cmap="YlOrRd", vmin=0,
-                        vmax=max(_oh_dists.max(), _glove_dists.max()))
+    _im2 = _ax2.imshow(_glove_cos, cmap="RdYlGn", vmin=-1, vmax=1)
     _ax2.set_xticks(range(_n))
     _ax2.set_xticklabels(_words, rotation=45, ha="right", fontsize=9)
     _ax2.set_yticks(range(_n))
     _ax2.set_yticklabels(_words, fontsize=9)
-    _ax2.set_title("GloVe distances (50-dim)", fontsize=11)
+    _ax2.set_title("GloVe cosine similarity (50-dim)", fontsize=11)
     for _i in range(_n):
         for _j in range(_n):
-            _ax2.text(_j, _i, f"{_glove_dists[_i,_j]:.1f}", ha="center",
+            _ax2.text(_j, _i, f"{_glove_cos[_i,_j]:.2f}", ha="center",
                       va="center", fontsize=8,
-                      color="white" if _glove_dists[_i,_j] > 5.0 else "black")
+                      color="white" if abs(_glove_cos[_i,_j]) < 0.3 else "black")
 
     _plt.tight_layout()
     _plt.close(_fig)
@@ -114,11 +107,12 @@ def _(vectors, mo):
     mo.vstack([
         _fig,
         mo.md("""
-        **Left**: one-hot distances. Every pair is exactly √2 apart — "cat"
-        is no closer to "dog" than to "france." No structure at all.
+        **Left**: one-hot cosine similarities. Every pair is exactly 0
+        — "cat" is no more similar to "dog" than to "france." No structure
+        at all.
 
-        **Right**: GloVe distances. Now cat–dog is close, king–queen is
-        close, paris–france is close. The geometry encodes meaning.
+        **Right**: GloVe cosine similarities. Now cat–dog, king–queen,
+        and paris–france show real similarity. The geometry encodes meaning.
 
         One-hot codes live in V-dimensional space (V = vocabulary size,
         typically 50,000–150,000) but use only **one** of those dimensions
@@ -250,8 +244,11 @@ def _(dim_slider_orth, vectors, mo):
     _iu = _np.triu_indices(_n, k=1)
     _rand_cos = _gram[_iu]
 
-    # GloVe pairwise cosines (first 500 words, always 50-dim)
-    _glove_words = list(vectors.key_to_index)[:_n]
+    # GloVe pairwise cosines — sample from rank 1K-50K to avoid the
+    # most common words (which cluster in one hemisphere due to training;
+    # see note below)
+    _all_words = list(vectors.key_to_index)[1000:50000]
+    _glove_words = list(_rng.choice(_all_words, _n, replace=False))
     _glove_vecs = _np.array([vectors[w] for w in _glove_words], dtype=float)
     _glove_norms = _np.linalg.norm(_glove_vecs, axis=1, keepdims=True)
     _glove_vecs_normed = _glove_vecs / _glove_norms
@@ -291,10 +288,16 @@ def _(dim_slider_orth, vectors, mo):
         distribution sharpens to a spike at zero — almost every pair is
         nearly orthogonal.
 
-        **Right**: pairwise cosines of the 500 most common GloVe words
-        (always 50-dim). The distribution is broader and shifted — real
-        embeddings have genuine clusters of similar words. The structure
-        is *not* random.
+        **Right**: pairwise cosines of 500 GloVe words (always 50-dim).
+        The distribution is broader — real embeddings have genuine clusters
+        of similar words. The structure is *not* random.
+
+        (We sample from rank 1K–50K in the vocabulary. The top ~500 words
+        — "the," "of," "and" — are almost all positively correlated with
+        each other because they co-occur with everything. That's a real
+        property of how GloVe was trained, and the
+        [training notebook](https://jalammar.github.io/illustrated-word2vec/)
+        is the place to understand it.)
 
         Drag the slider to D=2 and watch the random histogram go flat.
         Then drag to D=500 and watch it collapse. GloVe stays the same.
