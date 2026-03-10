@@ -12,7 +12,8 @@ import uvicorn
 server = (
     marimo.create_asgi_app()
     .with_app(path="/tokenizer", root="/app/notebooks/tokenizer_demo.py")
-    .with_app(path="/embeddings", root="/app/notebooks/embedding_demo.py")
+    .with_app(path="/embedding", root="/app/notebooks/embedding_demo.py")
+    .with_app(path="/dot-product", root="/app/notebooks/dot_product_demo.py")
 )
 
 app = FastAPI()
