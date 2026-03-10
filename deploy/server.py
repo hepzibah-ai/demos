@@ -14,6 +14,7 @@ server = (
     .with_app(path="/tokenizer", root="/app/notebooks/tokenizer_demo.py")
     .with_app(path="/embedding", root="/app/notebooks/embedding_demo.py")
     .with_app(path="/dot-product", root="/app/notebooks/dot_product_demo.py")
+    .with_app(path="/high-dimensions", root="/app/notebooks/high_dimensions_demo.py")
 )
 
 app = FastAPI()

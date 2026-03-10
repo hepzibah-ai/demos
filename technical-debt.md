@@ -22,7 +22,7 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 1 | `tokenizer_demo.py` | What's a Token? | `/tokenizer` | Deployed |
 | 2 | `embedding_demo.py` | What's an Embedding? | `/embedding` | Deployed |
 | 3 | `dot_product_demo.py` | The Dot Product | `/dot-product` | Deployed (beta) |
-| 4 | — | High Dimensions | — | Planned |
+| 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) |
 | 5 | — | Precision and Energy | — | Planned |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | — | PCA | — | Planned |
@@ -36,52 +36,74 @@ Wiki companion pages: [How LLMs See Words](https://github.com/hepzibah-ai/genera
 
 ## Notebook 4: "High Dimensions"
 
-Next to build. The arc: high-D geometry sets the rules (§1–3), training
-finds structure within those rules (§4–6).
+Next to build. The story in three acts:
+- **Act I** (§1–2): Where we came from — one-hot codes, the curse
+- **Act II** (§3–5): The geometry — what high-D space is actually like
+- **Act III** (§6–8): Structure — how training exploits the geometry,
+  and why sparsity is a fundamental property (not a hardware trick)
+
+No hardware discussion here — just build the understanding. Later
+notebooks (precision/energy, microscaling) and sim0 analyses (seven
+dwarfs) harvest these ideas.
 
 ### Sections:
-1. **Random orthogonality**: 1000 random unit vectors in D dims, histogram
-   of pairwise cosines. Slider for dimension — watch histogram sharpen.
-   Compare random vs GloVe side by side.
-2. **Sphere shell volume**: fraction within ε of surface vs D. Interactive
-   slider. By D=50 it's ~1.0.
-3. **Gaussian coordinates and heavy tails**: random unit vector in D dims
-   has coords ≈ N(0, 1/√D). Show this, then show real GloVe coordinates —
-   heavier tails. Two distinct mechanisms to disentangle:
-   - **GloVe's heavy tails** come from language statistics (Zipf's law: a
-     few words dominate co-occurrence counts, shaping the embedding
-     geometry). GloVe has no dropout or L1/L2 regularization — the tails
-     are structural. Reference: Pennington et al. 2014; for Zipf, point to
-     Wikipedia "Zipf's law" and Powers 1998 "Applications and explanations
-     of Zipf's law" for depth.
-   - **Transformer activation outliers** are a different, more extreme
-     phenomenon emerging at scale (~6.7B+ params): specific dimensions fire
-     with much larger magnitude. Reference: Dettmers et al. 2022
-     "LLM.int8()" (canonical); Anthropic "Toy Models of Superposition"
-     2022 (partial theoretical explanation via outlier features).
-   - **Visualization**: log-log survival plot (complementary CDF). Pool all
-     GloVe coordinates, plot P(|x| > t) vs t on log-log axes alongside a
-     matched Gaussian. Gaussian drops like a cliff; GloVe sits above it in
-     the tails. The log abscissa has physical meaning: floating-point codes
-     are logarithmically spaced, so the x-axis *is* the number line of an
-     fp format. Draw a vertical line at the clipping boundary of fp8/int8 —
-     everything to the right gets crushed. This foreshadows notebook 5
-     directly: the plot shows *why* fp8's log spacing wastes fewer codes in
-     the empty middle and keeps more in the populated tails. Skip kurtosis
-     — the plot teaches more than a number.
+1. **One-hot: where we came from**: before embeddings, every word was a
+   one-hot vector — vocabulary of 50K words → 50K-dim vector with a
+   single 1. Maximally sparse, zero structure. Every word is equidistant
+   from every other (all pairwise distances = √2). This is the baseline
+   the rest of the notebook improves on.
+2. **The curse of dimensionality**: Bellman's original insight — volume
+   grows exponentially with dimension, so uniform sampling becomes
+   hopeless. The one-hot representation is the curse in its purest form:
+   50K dimensions, all information in 1 of them. Show: fraction of
+   hypercube volume within ε of the surface vs D (same calculation as
+   sphere shell, but starting from the cube makes the "curse" framing
+   concrete). Reference: Bellman 1961; Hamming ch.9 for the accessible
+   version.
+3. **Random vectors are nearly orthogonal**: 1000 random unit vectors in
+   D dims, histogram of pairwise cosines. Slider for dimension — watch
+   histogram sharpen around zero. Compare random vs GloVe side by side.
+   Key insight: in high-D, "most directions are roughly perpendicular
+   to most other directions." This is concentration of measure.
+4. **Everything lives on the shell**: fraction of sphere volume within ε
+   of surface vs D. By D=50 it's ~1.0. Coordinates of a random unit
+   vector ≈ N(0, 1/√D) — show histogram. This is why norms concentrate.
+5. **Heavy tails — what's NOT Gaussian**: pool all GloVe coordinates,
+   show they're heavier-tailed than the matched Gaussian. Two distinct
+   mechanisms:
+   - **GloVe**: tails from language statistics (Zipf's law — a few words
+     dominate co-occurrence). No regularization; the tails are structural.
+     Reference: Pennington et al. 2014; Wikipedia "Zipf's law"; Powers
+     1998.
+   - **Transformer activations**: more extreme outliers emerging at scale
+     (~6.7B+ params). Reference: Dettmers et al. 2022 "LLM.int8()";
+     Anthropic "Toy Models of Superposition" 2022.
+   - **Visualization**: log-log survival plot (complementary CDF). GloVe
+     coordinates vs matched Gaussian on log-log axes. Gaussian drops like
+     a cliff; GloVe sits above in the tails. The log abscissa has physical
+     meaning (floating-point codes are log-spaced). Draw clipping
+     boundaries for fp8/int8 — foreshadows notebook 5.
    - Frame honestly: "GloVe shows mild heavy tails from Zipf; transformer
-     activations show extreme outliers from a different mechanism — and
-     that's the one that matters for hardware."
-4. **Linear representation hypothesis**: why trained embeddings have
-   structure when random vectors don't. Network learns to encode concepts
-   as directions. King − man + woman = queen because gender is a direction.
+     activations show extreme outliers from a different mechanism."
+6. **The curse becomes a blessing — linear representations**: trained
+   embeddings have structure where random vectors don't. The network
+   learns to encode concepts as *directions*. King − man + woman = queen
+   because gender is a direction. The high-D space that cursed one-hot
+   codes is exactly what makes this possible: there's room for thousands
+   of near-orthogonal meaningful directions in 50 dimensions.
    References: Mikolov 2013, Elhage et al. "Toy Models of Superposition".
-5. **Superposition**: more concepts than dimensions, packed via
-   near-orthogonal directions. Callback to embedding demo's orthogonality
-   section.
-6. **Nearest-neighbor collapse**: for random data, farthest/nearest
-   distance ratio → 1 as D grows. But NOT for trained embeddings — show
-   both.
+7. **Superposition and sparsity**: more concepts than dimensions, packed
+   via near-orthogonal directions. Callback to embedding demo's
+   orthogonality section. Key insight: if representations are
+   superposed, activations are naturally *sparse* — most features are
+   off for any given input. This isn't an accident or a compression
+   trick; it's a fundamental consequence of how high-D representations
+   work. (Don't connect to hardware here — just establish sparsity as a
+   property of the representations themselves.)
+8. **Nearest-neighbor collapse**: for random data, farthest/nearest
+   distance ratio → 1 as D grows (the curse). But NOT for trained
+   embeddings — show both. This is why embeddings are useful despite
+   high dimensionality: the learned structure defeats the curse.
 7. **References**: Hamming ch.9, 3Blue1Brown higher-dimensions video,
    Elhage et al., Dettmers et al., Pennington et al. 2014, Powers 1998 /
    Wikipedia (Zipf's law).
@@ -168,12 +190,32 @@ open-weight) or private (sim0 — closer to hardware analysis).
 
 ---
 
-## Notebook 7: "Clustering"
+## Notebook 7: "Clustering and Search"
 
+Two sides of the same problem: finding structure (clustering) and finding
+one thing fast (search). Both are responses to the curse of dimensionality
+from notebook 4.
+
+### Clustering:
 - k-means on embeddings, color by cluster in 3D plotly
 - Elbow / silhouette — interactive slider for k
 - Hierarchical clustering — dendrogram
 - Maybe t-SNE/UMAP for "map of all words" (precompute on subset)
+
+### Vector search (approximate nearest neighbor):
+- Callback to notebook 4 §8: exact nearest-neighbor breaks down in high-D
+  (distance concentration). So how do vector databases actually work?
+- **LSH** (locality-sensitive hashing): random projections bucket similar
+  vectors together. The dot product shows up again — each hash is a
+  sign(random_vector · query).
+- **IVF** (inverted file index): cluster first (Voronoi cells), then only
+  search nearby clusters. Clustering as a search accelerator.
+- **HNSW** (hierarchical navigable small world): graph-based, greedy
+  traversal. Skip-list intuition.
+- Interactive: build a small index on GloVe, compare exact vs approximate
+  search — show recall/speed tradeoff with a slider for number of probes.
+- This is the bridge to RAG and production LLM systems: context
+  engineering starts with retrieval, retrieval starts with vector search.
 
 ---
 
@@ -228,7 +270,8 @@ Probably more essay than notebook. Needs a CJK-aware embedding model
 
 ## References to weave in
 
-- Hamming, "The Art of Doing Science and Engineering" ch.9 (high-D)
+- Bellman 1961, "Adaptive Control Processes" (curse of dimensionality, original source)
+- Hamming, "The Art of Doing Science and Engineering" ch.9 (high-D, accessible)
 - Jay Alammar, "Illustrated Word2Vec" (embeddings, already linked)
 - Mikolov et al. 2013 (word2vec arithmetic, linear representations)
 - Elhage et al. / Anthropic 2022, "Toy Models of Superposition"
