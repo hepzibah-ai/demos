@@ -477,14 +477,16 @@ def _(vectors, mo):
         The red line (GloVe) sits above the blue line (Gaussian) in the
         tails — there are more extreme values than a Gaussian predicts.
 
-        **Why?** GloVe is trained on word co-occurrence counts, which follow
-        [Zipf's law](https://en.wikipedia.org/wiki/Zipf%27s_law): a few
-        words ("the", "of", "and") dominate the statistics. This skewed
-        input produces embeddings with heavier tails than random vectors.
-        GloVe uses no dropout or L1/L2 regularization — the tails are
-        structural, coming from the language itself
-        ([Pennington et al. 2014](https://nlp.stanford.edu/pubs/glove.pdf);
-        for Zipf, see Powers 1998).
+        **Why?** Language itself is skewed: a few words ("the", "of",
+        "and") appear vastly more often than others — that's
+        [Zipf's law](https://en.wikipedia.org/wiki/Zipf%27s_law). GloVe
+        learns from word co-occurrence counts, so this skew flows straight
+        into the embedding geometry. The heavy tails aren't noise; they're
+        the structure of language showing through. (How exactly training
+        produces this is a story for the
+        [training notebook](https://jalammar.github.io/illustrated-word2vec/);
+        for the original paper, see
+        [Pennington et al. 2014](https://nlp.stanford.edu/pubs/glove.pdf).)
 
         The dotted line shows where a 3σ clipping boundary falls. Everything
         to the right gets crushed to a single value. The gap between the
