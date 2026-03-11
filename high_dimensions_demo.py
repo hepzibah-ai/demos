@@ -516,6 +516,219 @@ def _(mo):
     Everything above applies to **random** vectors. But trained embeddings
     aren't random — the network learns to encode concepts as *directions*.
 
+    How many directions can a space hold? Let's start with cases you can
+    draw. If you want N+1 vectors to be **maximally spread** in N
+    dimensions (every pair at the same angle), there's exactly one answer:
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    from mpl_toolkits.mplot3d import Axes3D as _Axes3D
+
+    _fig = _plt.figure(figsize=(10, 4.5))
+
+    # ── Left: 2D — 3 vectors at 120° ──
+    _ax1 = _fig.add_subplot(1, 2, 1)
+    _angles_deg = [0, 120, 240]
+    _angles_rad = [a * _np.pi / 180 for a in _angles_deg]
+    _colors = ["#1E88E5", "#E53935", "#43A047"]
+
+    _ax1.set_xlim(-1.4, 1.4)
+    _ax1.set_ylim(-1.4, 1.4)
+    _ax1.set_aspect("equal")
+
+    # Unit circle (faint)
+    _theta = _np.linspace(0, 2 * _np.pi, 100)
+    _ax1.plot(_np.cos(_theta), _np.sin(_theta), color="#ddd", lw=1)
+    _ax1.axhline(0, color="#eee", lw=0.5)
+    _ax1.axvline(0, color="#eee", lw=0.5)
+
+    for _i, (_a, _c) in enumerate(zip(_angles_rad, _colors)):
+        _x, _y = _np.cos(_a), _np.sin(_a)
+        _ax1.annotate("", xy=(_x, _y), xytext=(0, 0),
+                       arrowprops=dict(arrowstyle="->,head_width=0.15",
+                                       color=_c, lw=2.5))
+        _ax1.text(_x * 1.15, _y * 1.15, f"v{_i+1}",
+                  ha="center", va="center", fontsize=10, fontweight="bold",
+                  color=_c)
+
+    _ax1.set_title("2D: 3 vectors at 120°", fontsize=11)
+    _ax1.text(0, -1.35, "cos 120° = −0.50", ha="center", fontsize=9,
+              color="#666")
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+    _ax1.spines["bottom"].set_visible(False)
+    _ax1.spines["left"].set_visible(False)
+    _ax1.set_xticks([])
+    _ax1.set_yticks([])
+
+    # ── Right: 3D — tetrahedron (4 vectors at 109.47°) ──
+    _ax2 = _fig.add_subplot(1, 2, 2, projection="3d")
+    _tet = _np.array([
+        [1, 1, 1],
+        [1, -1, -1],
+        [-1, 1, -1],
+        [-1, -1, 1],
+    ], dtype=float) / _np.sqrt(3)
+
+    _colors3 = ["#1E88E5", "#E53935", "#43A047", "#FF9800"]
+    for _i in range(4):
+        _ax2.plot([0, _tet[_i, 0]], [0, _tet[_i, 1]], [0, _tet[_i, 2]],
+                  color=_colors3[_i], lw=2.5)
+        _ax2.scatter(*_tet[_i], color=_colors3[_i], s=60, zorder=5)
+        _ax2.text(_tet[_i, 0] * 1.2, _tet[_i, 1] * 1.2,
+                  _tet[_i, 2] * 1.2, f"v{_i+1}", fontsize=9,
+                  fontweight="bold", color=_colors3[_i])
+
+    # Draw edges (faint)
+    for _i in range(4):
+        for _j in range(_i + 1, 4):
+            _ax2.plot([_tet[_i, 0], _tet[_j, 0]],
+                      [_tet[_i, 1], _tet[_j, 1]],
+                      [_tet[_i, 2], _tet[_j, 2]],
+                      color="#ccc", lw=0.8, ls="--")
+
+    _ax2.set_title("3D: 4 vectors at 109.5°", fontsize=11)
+    _ax2.text2D(0.5, 0.02, "cos 109.5° = −0.33", ha="center", fontsize=9,
+                color="#666", transform=_ax2.transAxes)
+    _ax2.set_xlim(-1, 1)
+    _ax2.set_ylim(-1, 1)
+    _ax2.set_zlim(-1, 1)
+    _ax2.set_xticks([])
+    _ax2.set_yticks([])
+    _ax2.set_zticks([])
+    _ax2.xaxis.pane.fill = False
+    _ax2.yaxis.pane.fill = False
+    _ax2.zaxis.pane.fill = False
+    _ax2.xaxis.pane.set_edgecolor("w")
+    _ax2.yaxis.pane.set_edgecolor("w")
+    _ax2.zaxis.pane.set_edgecolor("w")
+
+    _plt.tight_layout()
+    _plt.close(_fig)
+
+    mo.vstack([
+        _fig,
+        mo.md("""
+        In **2D** you can fit 3 equi-angled vectors, each 120° apart
+        (cos = −0.50). In **3D** you can fit 4 — the vertices of a
+        tetrahedron, at 109.5° (cos = −0.33). In general, N dimensions
+        fit N+1 perfectly equi-angled vectors at cos θ = −1/N.
+
+        But "exactly equi-angled" is a severe constraint. What if we
+        relax it a little — allowing vectors to be *nearly* orthogonal
+        instead of exactly equi-angled? Then we can pack **far more**
+        directions, and high dimensionality is the reason.
+        """),
+    ])
+
+
+@app.cell
+def _(mo):
+    welch_m_slider = mo.ui.slider(
+        start=10, stop=100000, step=10, value=16000,
+        label="Number of vectors (M):",
+        full_width=True,
+    )
+    welch_d_slider = mo.ui.slider(
+        start=2, stop=10000, step=1, value=7168,
+        label="Dimensions (N):",
+        full_width=True,
+    )
+    mo.vstack([welch_m_slider, welch_d_slider])
+    return (welch_m_slider, welch_d_slider)
+
+
+@app.cell
+def _(welch_m_slider, welch_d_slider, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+
+    _M = welch_m_slider.value
+    _N = welch_d_slider.value
+
+    # Welch bound: min possible max |correlation| among M unit vectors in R^N
+    # |ρ_max| >= sqrt((M - N) / (N * (M - 1)))   when M > N
+    _dims = _np.arange(2, min(_N + 1, 10001))
+
+    def _welch_bound(m, n):
+        if m <= n:
+            return 0.0  # can fit m orthogonal vectors
+        return _np.sqrt((m - n) / (n * (m - 1)))
+
+    _bounds = _np.array([_welch_bound(_M, d) for d in _dims])
+
+    # Current value
+    _current_bound = _welch_bound(_M, _N)
+
+    # For comparison: equi-angled N+1 vectors give cos = 1/N
+    _equi_angle = 1.0 / _N if _N > 0 else 1.0
+
+    _fig, _ax = _plt.subplots(figsize=(10, 4.5))
+    _ax.plot(_dims, _bounds, color="#1E88E5", lw=2)
+
+    # Mark current dimension
+    if _N <= len(_dims):
+        _ax.plot(_N, _current_bound, "o", color="#E53935", ms=10, zorder=5)
+        _label = f"N={_N}: bound = {_current_bound:.4f}"
+        if _current_bound < 0.01:
+            _label = f"N={_N}: bound = {_current_bound:.6f}"
+        _ax.annotate(_label, (_N, _current_bound),
+                     textcoords="offset points", xytext=(15, 10),
+                     fontsize=10, color="#E53935",
+                     arrowprops=dict(arrowstyle="->", color="#E53935"))
+
+    # Mark where M = N (orthogonal packing possible)
+    if _M <= _dims[-1]:
+        _ax.axvline(_M, color="#43A047", lw=1.5, ls="--", alpha=0.7,
+                    label=f"N = M = {_M} (all orthogonal)")
+
+    _ax.set_xlabel("Dimensions (N)", fontsize=10)
+    _ax.set_ylabel("Welch bound (min possible max |correlation|)", fontsize=10)
+    _ax.set_title(f"Packing {_M:,} nearly-orthogonal vectors", fontsize=11)
+    _ax.legend(fontsize=9)
+    _ax.spines["top"].set_visible(False)
+    _ax.spines["right"].set_visible(False)
+    _ax.set_ylim(bottom=0)
+    _plt.tight_layout()
+    _plt.close(_fig)
+
+    # Interpretive text
+    if _M <= _N:
+        _interp = f"""
+        With M={_M:,} vectors in N={_N:,} dimensions, M ≤ N — you can make
+        them all **exactly orthogonal**. No compromise needed.
+        """
+    else:
+        _angle = _np.degrees(_np.arccos(_current_bound))
+        _interp = f"""
+        The [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
+        says: if you pack {_M:,} unit vectors into {_N:,} dimensions,
+        at least one pair must have |cosine| ≥ **{_current_bound:.6f}**
+        — that's an angle of {_angle:.1f}°, barely distinguishable
+        from 90°.
+
+        {"That's " + str(_M - _N) + " *extra* vectors beyond what orthogonality allows, and they barely interfere." if _M > _N else ""}
+
+        Try setting M = 100, N = 50 — the bound is still small. Or
+        set N = 2 to see how tight things get in low dimensions. The
+        message: **high-dimensional spaces are enormous**. There's room
+        to pack thousands of nearly-orthogonal concept directions.
+        """
+
+    mo.vstack([
+        _fig,
+        mo.md(_interp),
+    ])
+
+
+@app.cell
+def _(mo):
+    mo.md("""
     This is the **linear representation hypothesis**: "king" minus "man"
     plus "woman" lands near "queen" because gender, royalty, and other
     concepts correspond to directions in the space. The high dimensionality
