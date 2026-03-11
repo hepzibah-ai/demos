@@ -630,7 +630,7 @@ def _(mo):
 @app.cell
 def _(mo):
     welch_m_slider = mo.ui.slider(
-        start=10, stop=100000, step=10, value=16000,
+        start=10, stop=200000, step=10, value=100000,
         label="Number of vectors (M):",
         full_width=True,
     )
@@ -685,7 +685,11 @@ def _(welch_m_slider, welch_d_slider, mo):
     # Mark where M = N (orthogonal packing possible)
     if _M <= _dims[-1]:
         _ax.axvline(_M, color="#43A047", lw=1.5, ls="--", alpha=0.7,
-                    label=f"N = M = {_M} (all orthogonal)")
+                    label=f"N = M = {_M:,} (all orthogonal)")
+
+    # Asymptote: 1/sqrt(N)
+    _ax.plot(_dims, 1.0 / _np.sqrt(_dims), color="#999", lw=1, ls=":",
+             label="1/√N (limit for M → ∞)")
 
     _ax.set_xlabel("Dimensions (N)", fontsize=10)
     _ax.set_ylabel("Welch bound (min possible max |correlation|)", fontsize=10)
@@ -697,6 +701,12 @@ def _(welch_m_slider, welch_d_slider, mo):
     _plt.tight_layout()
     _plt.close(_fig)
 
+    # Asymptotic bound: for M >> N, Welch -> 1/sqrt(N)
+    _asymptote = 1.0 / _np.sqrt(_N) if _N > 0 else 1.0
+
+    # fp8 E4M3 dot-product noise: u * sqrt(2/(3*N)), u = 2^(-4)
+    _fp8_noise = 2**(-4) * _np.sqrt(2.0 / (3 * _N)) if _N > 1 else 1.0
+
     # Interpretive text
     if _M <= _N:
         _interp = f"""
@@ -705,19 +715,27 @@ def _(welch_m_slider, welch_d_slider, mo):
         """
     else:
         _angle = _np.degrees(_np.arccos(_current_bound))
+        _ratio = _current_bound / _fp8_noise
         _interp = f"""
         The [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
         says: if you pack {_M:,} unit vectors into {_N:,} dimensions,
         at least one pair must have |cosine| ≥ **{_current_bound:.6f}**
-        — that's an angle of {_angle:.1f}°, barely distinguishable
-        from 90°.
+        — that's {90 - _angle:.2f}° from orthogonal.
 
-        {"That's " + str(_M - _N) + " *extra* vectors beyond what orthogonality allows, and they barely interfere." if _M > _N else ""}
+        Notice the curve flattens: for M much larger than N, the bound
+        saturates at 1/√N = {_asymptote:.4f}. Try doubling M — it
+        barely moves. **Dimension is what matters, not how many vectors
+        you pack in.**
 
-        Try setting M = 100, N = 50 — the bound is still small. Or
-        set N = 2 to see how tight things get in low dimensions. The
-        message: **high-dimensional spaces are enormous**. There's room
-        to pack thousands of nearly-orthogonal concept directions.
+        Is this visible to low-precision arithmetic? fp8 (E4M3) introduces
+        cosine noise of about σ ≈ {_fp8_noise:.6f} when computing a
+        {_N:,}-dim dot product. The Welch bound is **{_ratio:.0f}× larger**
+        — the geometric structure survives quantization comfortably.
+        The [precision notebook](/dot-product) digs into why.
+
+        Try N = 2 to see how tight things get in low dimensions, or
+        N = 50 (GloVe) vs N = 7168 (DeepSeek-V3) to see the effect
+        of dimension on packing capacity.
         """
 
     mo.vstack([
