@@ -629,118 +629,165 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    welch_m_slider = mo.ui.slider(
-        start=10, stop=200000, step=10, value=100000,
-        label="Number of vectors (M):",
-        full_width=True,
-    )
-    welch_d_slider = mo.ui.slider(
+    packing_dim_slider = mo.ui.slider(
         start=2, stop=10000, step=1, value=7168,
         label="Dimensions (N):",
         full_width=True,
     )
-    mo.vstack([welch_m_slider, welch_d_slider])
-    return (welch_m_slider, welch_d_slider)
+    packing_dim_slider
+    return (packing_dim_slider,)
 
 
 @app.cell
-def _(welch_m_slider, welch_d_slider, mo):
+def _(packing_dim_slider, mo):
     import numpy as _np
     import matplotlib.pyplot as _plt
+    import math as _math
 
-    _M = welch_m_slider.value
-    _N = welch_d_slider.value
+    _N = packing_dim_slider.value
 
-    # Welch bound: min possible max |correlation| among M unit vectors in R^N
-    # |ρ_max| >= sqrt((M - N) / (N * (M - 1)))   when M > N
-    _dims = _np.arange(2, min(_N + 1, 10001))
+    # x-axis: angle deviation from 90° (degrees)
+    _deltas = _np.linspace(0.05, 30, 600)
+    _epsilons = _np.sin(_np.radians(_deltas))  # max |cosine| tolerance
 
-    def _welch_bound(m, n):
-        if m <= n:
-            return 0.0  # can fit m orthogonal vectors
-        return _np.sqrt((m - n) / (n * (m - 1)))
+    # ── Helper: log10(erfc(x)) stable for large x ──
+    def _log10_erfc(x):
+        if x < 25:
+            _v = _math.erfc(x)
+            if _v > 0:
+                return _math.log10(_v)
+        # Asymptotic: erfc(x) ~ exp(-x^2) / (x * sqrt(pi))
+        return -x**2 * _math.log10(_math.e) - _math.log10(x) \
+               - 0.5 * _math.log10(_math.pi)
 
-    _bounds = _np.array([_welch_bound(_M, d) for d in _dims])
+    # ── Sphere-packing upper bound ──
+    # Each vector excludes a double cap; caps can't overlap.
+    # P(|<u,v>| > eps) ~ erfc(eps * sqrt(N/2)) for large N.
+    # M_upper <= 1/p, so log10(M) = -log10(erfc(...))
+    _log_upper = _np.array([
+        -_log10_erfc(e * _math.sqrt(_N / 2)) for e in _epsilons
+    ])
 
-    # Current value
-    _current_bound = _welch_bound(_M, _N)
+    # ── Random-coding lower bound ──
+    # Union bound: M(M-1)/2 * p < 1  =>  M ~ sqrt(2/p)
+    # log10(M) = 0.5 * (log10(2) - log10(p))
+    _log_lower = 0.5 * (_math.log10(2) + _log_upper)
 
-    # For comparison: equi-angled N+1 vectors give cos = 1/N
-    _equi_angle = 1.0 / _N if _N > 0 else 1.0
+    # ── Welch bound (algebraic upper, tight for small eps) ──
+    # M <= N(1-eps^2)/(1 - N*eps^2), valid for eps < 1/sqrt(N)
+    _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
+    _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
+    _log_welch = _np.full_like(_epsilons, _np.nan)
+    for _i, _e in enumerate(_epsilons):
+        if _e < _welch_limit * 0.999:
+            _denom = 1.0 - _N * _e**2
+            if _denom > 0:
+                _m = _N * (1.0 - _e**2) / _denom
+                if _m > 1:
+                    _log_welch[_i] = _math.log10(_m)
 
-    _fig, _ax = _plt.subplots(figsize=(10, 4.5))
-    _ax.plot(_dims, _bounds, color="#1E88E5", lw=2)
+    # ── fp8 dot-product noise as angle ──
+    _fp8_noise_cos = 2**(-4) * _math.sqrt(2.0 / (3 * _N)) if _N > 1 else 1.0
+    _fp8_noise_deg = _math.degrees(_math.asin(min(_fp8_noise_cos, 1.0)))
 
-    # Mark current dimension
-    if _N <= len(_dims):
-        _ax.plot(_N, _current_bound, "o", color="#E53935", ms=10, zorder=5)
-        _label = f"N={_N}: bound = {_current_bound:.4f}"
-        if _current_bound < 0.01:
-            _label = f"N={_N}: bound = {_current_bound:.6f}"
-        _ax.annotate(_label, (_N, _current_bound),
-                     textcoords="offset points", xytext=(15, 10),
-                     fontsize=10, color="#E53935",
-                     arrowprops=dict(arrowstyle="->", color="#E53935"))
+    # ── Plot ──
+    _fig, _ax = _plt.subplots(figsize=(10, 5.5))
 
-    # Mark where M = N (orthogonal packing possible)
-    if _M <= _dims[-1]:
-        _ax.axvline(_M, color="#43A047", lw=1.5, ls="--", alpha=0.7,
-                    label=f"N = M = {_M:,} (all orthogonal)")
+    # Shaded region between bounds
+    _ax.fill_between(_deltas, _log_lower, _log_upper,
+                     alpha=0.08, color="#888")
 
-    # Asymptote: 1/sqrt(N)
-    _ax.plot(_dims, 1.0 / _np.sqrt(_dims), color="#999", lw=1, ls=":",
-             label="1/√N (limit for M → ∞)")
+    _ax.plot(_deltas, _log_upper, color="#E53935", lw=2,
+             label="Upper bound (sphere packing)")
+    _ax.plot(_deltas, _log_lower, color="#43A047", lw=2,
+             label="Lower bound (random coding)")
 
-    _ax.set_xlabel("Dimensions (N)", fontsize=10)
-    _ax.set_ylabel("Welch bound (min possible max |correlation|)", fontsize=10)
-    _ax.set_title(f"Packing {_M:,} nearly-orthogonal vectors", fontsize=11)
-    _ax.legend(fontsize=9)
+    # Welch bound (only valid for small angles)
+    _valid = ~_np.isnan(_log_welch)
+    if _valid.any():
+        _ax.plot(_deltas[_valid], _log_welch[_valid], color="#FF9800",
+                 lw=2.5, ls="--", label="Welch bound (algebraic)")
+        _ax.axvline(_welch_limit_deg, color="#FF9800", lw=1, ls=":",
+                    alpha=0.4)
+        _ax.text(_welch_limit_deg + 0.3,
+                 _ax.get_ylim()[1] * 0.05 if _ax.get_ylim()[1] > 0 else 1,
+                 f"1/√N = {_welch_limit:.4f}\n({_welch_limit_deg:.2f}°)",
+                 fontsize=8, color="#FF9800", va="bottom")
+
+    # Reference: DeepSeek-V3 vocab size
+    _ax.axhline(_math.log10(129280), color="#1E88E5", lw=1.5, ls="--",
+                alpha=0.7, label="DeepSeek-V3 vocab (129K)")
+
+    # Reference: fp8 noise floor
+    if _fp8_noise_deg < 30:
+        _ax.axvline(_fp8_noise_deg, color="#999", lw=1.5, ls=":",
+                    alpha=0.6)
+        _ax.text(_fp8_noise_deg + 0.2, _log_upper.max() * 0.9,
+                 f"fp8 noise\n({_fp8_noise_deg:.2f}°)", fontsize=8,
+                 color="#666", va="top")
+
+    _ax.set_xlabel("Angle deviation from 90° (degrees)", fontsize=10)
+    _ax.set_ylabel("Number of vectors M  (log₁₀ scale)", fontsize=10)
+    _ax.set_title(
+        f"How many nearly-orthogonal vectors fit in {_N:,} dimensions?",
+        fontsize=11)
+    _ax.legend(fontsize=9, loc="upper left")
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
     _ax.set_ylim(bottom=0)
+    _ax.set_xlim(0, 30)
     _plt.tight_layout()
     _plt.close(_fig)
 
-    # Asymptotic bound: for M >> N, Welch -> 1/sqrt(N)
-    _asymptote = 1.0 / _np.sqrt(_N) if _N > 0 else 1.0
+    # ── Interpretive text ──
+    # Where does the DeepSeek vocab line cross each bound?
+    # Bounds increase with angle; find smallest angle where bound >= vocab
+    _vocab = _math.log10(129280)
+    _cross_upper = None  # impossible below this angle
+    _cross_lower = None  # achievable above this angle
+    for _i in range(len(_deltas)):
+        if _cross_upper is None and _log_upper[_i] >= _vocab:
+            _cross_upper = float(_deltas[_i])
+        if _cross_lower is None and _log_lower[_i] >= _vocab:
+            _cross_lower = float(_deltas[_i])
 
-    # fp8 E4M3 dot-product noise: u * sqrt(2/(3*N)), u = 2^(-4)
-    _fp8_noise = 2**(-4) * _np.sqrt(2.0 / (3 * _N)) if _N > 1 else 1.0
-
-    # Interpretive text
-    if _M <= _N:
-        _interp = f"""
-        With M={_M:,} vectors in N={_N:,} dimensions, M ≤ N — you can make
-        them all **exactly orthogonal**. No compromise needed.
-        """
-    else:
-        _angle = _np.degrees(_np.arccos(_current_bound))
-        _ratio = _current_bound / _fp8_noise
-        _interp = f"""
-        The [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
-        says: if you pack {_M:,} unit vectors into {_N:,} dimensions,
-        at least one pair must have |cosine| ≥ **{_current_bound:.6f}**
-        — that's {90 - _angle:.2f}° from orthogonal.
-
-        Notice the curve flattens: for M much larger than N, the bound
-        saturates at 1/√N = {_asymptote:.4f}. Try doubling M — it
-        barely moves. **Dimension is what matters, not how many vectors
-        you pack in.**
-
-        Is this visible to low-precision arithmetic? fp8 (E4M3) introduces
-        cosine noise of about σ ≈ {_fp8_noise:.6f} when computing a
-        {_N:,}-dim dot product. The Welch bound is **{_ratio:.0f}× larger**
-        — the geometric structure survives quantization comfortably.
-        The [precision notebook](/dot-product) digs into why.
-
-        Try N = 2 to see how tight things get in low dimensions, or
-        N = 50 (GloVe) vs N = 7168 (DeepSeek-V3) to see the effect
-        of dimension on packing capacity.
-        """
+    _cross_text = ""
+    if _cross_upper and _cross_lower:
+        _cross_text = f"""
+        The DeepSeek-V3 vocabulary (129K tokens) is guaranteed packable
+        at **{_cross_lower:.1f}°** from orthogonal (lower bound), and
+        provably impossible below **{_cross_upper:.1f}°** (upper bound).
+        Both angles are tiny — the directions barely interfere."""
+    elif _cross_lower:
+        _cross_text = f"""
+        The DeepSeek-V3 vocabulary (129K tokens) is guaranteed packable
+        at **{_cross_lower:.1f}°** from orthogonal — and that's tiny."""
 
     mo.vstack([
         _fig,
-        mo.md(_interp),
+        mo.md(f"""
+        The grey region is the gap between what we know is achievable
+        (green, [random coding](https://en.wikipedia.org/wiki/Sphere_packing#In_higher_dimensions))
+        and what's provably impossible (red,
+        [sphere packing](https://en.wikipedia.org/wiki/Sphere_packing)).
+        The orange [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
+        is tighter but only works for very small angles (ε < 1/√N).
+        The true maximum lies in the grey region; the best known upper
+        bound ([Kabatiansky–Levenshtein, 1978](https://en.wikipedia.org/wiki/Kabatiansky%E2%80%93Levenshtein_bound))
+        roughly halves the gap.
+        {_cross_text}
+
+        The fp8 noise line ({_fp8_noise_deg:.2f}°) marks where
+        quantization noise in a {_N:,}-dim dot product equals the
+        angular deviation. Below that line, fp8 can't distinguish
+        "nearly orthogonal" from "exactly orthogonal." The packing
+        bounds are comfortably to the right — **fp8 preserves the
+        geometric structure**.
+
+        Try N = 50 (GloVe) to see how the picture changes in low
+        dimensions: the bounds shift left, angles get larger, and
+        the gap between achievable and impossible widens.
+        """),
     ])
 
 
