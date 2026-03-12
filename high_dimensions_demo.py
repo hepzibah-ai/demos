@@ -646,8 +646,11 @@ def _(packing_dim_slider, mo):
 
     _N = packing_dim_slider.value
 
-    # x-axis: angle deviation from 90° (degrees)
-    _deltas = _np.linspace(0.05, 30, 600)
+    # x-axis: angle deviation from 90°, range ~ 2× the Welch limit
+    _welch_lim_deg = _math.degrees(_math.asin(
+        min(1.0 / _math.sqrt(_N), 1.0))) if _N > 1 else 45.0
+    _x_max = max(_welch_lim_deg * 2.5, 0.5)  # at least 0.5° visible
+    _deltas = _np.linspace(0.001, _x_max, 600)
     _epsilons = _np.sin(_np.radians(_deltas))  # max |cosine| tolerance
 
     # ── Helper: log10(erfc(x)) stable for large x ──
@@ -709,9 +712,9 @@ def _(packing_dim_slider, mo):
                  lw=2.5, ls="--", label="Welch bound (algebraic)")
         _ax.axvline(_welch_limit_deg, color="#FF9800", lw=1, ls=":",
                     alpha=0.4)
-        _ax.text(_welch_limit_deg + 0.3,
+        _ax.text(_welch_limit_deg + _x_max * 0.02,
                  _ax.get_ylim()[1] * 0.05 if _ax.get_ylim()[1] > 0 else 1,
-                 f"1/√N = {_welch_limit:.4f}\n({_welch_limit_deg:.2f}°)",
+                 f"1/√N ({_welch_limit_deg:.2f}°)",
                  fontsize=8, color="#FF9800", va="bottom")
 
     # Reference: DeepSeek-V3 vocab size
@@ -719,11 +722,13 @@ def _(packing_dim_slider, mo):
                 alpha=0.7, label="DeepSeek-V3 vocab (129K)")
 
     # Reference: fp8 noise floor
-    if _fp8_noise_deg < 30:
+    if _fp8_noise_deg < _x_max:
         _ax.axvline(_fp8_noise_deg, color="#999", lw=1.5, ls=":",
                     alpha=0.6)
-        _ax.text(_fp8_noise_deg + 0.2, _log_upper.max() * 0.9,
-                 f"fp8 noise\n({_fp8_noise_deg:.2f}°)", fontsize=8,
+        _y_top = _log_upper[_log_upper < 1e10].max() if \
+            _np.any(_log_upper < 1e10) else 10
+        _ax.text(_fp8_noise_deg + _x_max * 0.01, _y_top * 0.85,
+                 f"fp8 noise\n({_fp8_noise_deg:.3f}°)", fontsize=8,
                  color="#666", va="top")
 
     _ax.set_xlabel("Angle deviation from 90° (degrees)", fontsize=10)
@@ -735,7 +740,7 @@ def _(packing_dim_slider, mo):
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
     _ax.set_ylim(bottom=0)
-    _ax.set_xlim(0, 30)
+    _ax.set_xlim(0, _x_max)
     _plt.tight_layout()
     _plt.close(_fig)
 
