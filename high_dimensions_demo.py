@@ -647,39 +647,14 @@ def _(packing_dim_slider, mo):
     _N = packing_dim_slider.value
 
     # x-axis: angle deviation from 90°, range ~ 2× the Welch limit
-    _welch_lim_deg = _math.degrees(_math.asin(
-        min(1.0 / _math.sqrt(_N), 1.0))) if _N > 1 else 45.0
-    _x_max = max(_welch_lim_deg * 2.5, 0.5)  # at least 0.5° visible
-    _deltas = _np.linspace(0.001, _x_max, 600)
-    _epsilons = _np.sin(_np.radians(_deltas))  # max |cosine| tolerance
-
-    # ── Helper: log10(erfc(x)) stable for large x ──
-    def _log10_erfc(x):
-        if x < 25:
-            _v = _math.erfc(x)
-            if _v > 0:
-                return _math.log10(_v)
-        # Asymptotic: erfc(x) ~ exp(-x^2) / (x * sqrt(pi))
-        return -x**2 * _math.log10(_math.e) - _math.log10(x) \
-               - 0.5 * _math.log10(_math.pi)
-
-    # ── Sphere-packing upper bound ──
-    # Each vector excludes a double cap; caps can't overlap.
-    # P(|<u,v>| > eps) ~ erfc(eps * sqrt(N/2)) for large N.
-    # M_upper <= 1/p, so log10(M) = -log10(erfc(...))
-    _log_upper = _np.array([
-        -_log10_erfc(e * _math.sqrt(_N / 2)) for e in _epsilons
-    ])
-
-    # ── Random-coding lower bound ──
-    # Union bound: M(M-1)/2 * p < 1  =>  M ~ sqrt(2/p)
-    # log10(M) = 0.5 * (log10(2) - log10(p))
-    _log_lower = 0.5 * (_math.log10(2) + _log_upper)
-
-    # ── Welch bound (algebraic upper, tight for small eps) ──
-    # M <= N(1-eps^2)/(1 - N*eps^2), valid for eps < 1/sqrt(N)
     _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
     _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
+    _x_max = max(_welch_limit_deg * 2.5, 0.5)
+    _deltas = _np.linspace(0.001, _x_max, 600)
+    _epsilons = _np.sin(_np.radians(_deltas))
+
+    # ── Welch bound (tight upper bound on M for eps < 1/sqrt(N)) ──
+    # M <= N(1-eps^2) / (1 - N*eps^2)
     _log_welch = _np.full_like(_epsilons, _np.nan)
     for _i, _e in enumerate(_epsilons):
         if _e < _welch_limit * 0.999:
@@ -689,109 +664,128 @@ def _(packing_dim_slider, mo):
                 if _m > 1:
                     _log_welch[_i] = _math.log10(_m)
 
+    # ── Sphere-packing upper bound (correct cap-volume formula) ──
+    # M <= sqrt(pi(N-1)/2) / sin(arccos(eps)/2)^(N-1)
+    # This is valid but astronomically loose at high N — shown to
+    # illustrate the gap between algebraic and volumetric bounds.
+    _log_sp = _np.full_like(_epsilons, _np.nan)
+    _C_sp = 0.5 * _math.log10(_math.pi * max(_N - 1, 1) / 2)
+    for _i, _e in enumerate(_epsilons):
+        _theta = _math.acos(min(_e, 0.9999))
+        _sin_half = _math.sin(_theta / 2)
+        if _sin_half > 0:
+            _val = (_N - 1) * _math.log10(1.0 / _sin_half) + _C_sp
+            _log_sp[_i] = _val
+
     # ── fp8 dot-product noise as angle ──
     _fp8_noise_cos = 2**(-4) * _math.sqrt(2.0 / (3 * _N)) if _N > 1 else 1.0
     _fp8_noise_deg = _math.degrees(_math.asin(min(_fp8_noise_cos, 1.0)))
 
+    # ── Where does DeepSeek vocab cross the Welch bound? ──
+    _vocab_log = _math.log10(129280)
+    _ds_cross_deg = None
+    for _i in range(len(_deltas)):
+        if not _np.isnan(_log_welch[_i]) and _log_welch[_i] >= _vocab_log:
+            _ds_cross_deg = float(_deltas[_i])
+            break
+
     # ── Plot ──
     _fig, _ax = _plt.subplots(figsize=(10, 5.5))
 
-    # Shaded region between bounds
-    _ax.fill_between(_deltas, _log_lower, _log_upper,
-                     alpha=0.08, color="#888")
-
-    _ax.plot(_deltas, _log_upper, color="#E53935", lw=2,
-             label="Upper bound (sphere packing)")
-    _ax.plot(_deltas, _log_lower, color="#43A047", lw=2,
-             label="Lower bound (random coding)")
-
-    # Welch bound (only valid for small angles)
+    # Welch bound — the main curve
     _valid = ~_np.isnan(_log_welch)
     if _valid.any():
         _ax.plot(_deltas[_valid], _log_welch[_valid], color="#FF9800",
-                 lw=2.5, ls="--", label="Welch bound (algebraic)")
-        _ax.axvline(_welch_limit_deg, color="#FF9800", lw=1, ls=":",
-                    alpha=0.4)
-        _ax.text(_welch_limit_deg + _x_max * 0.02,
-                 _ax.get_ylim()[1] * 0.05 if _ax.get_ylim()[1] > 0 else 1,
-                 f"1/√N ({_welch_limit_deg:.2f}°)",
-                 fontsize=8, color="#FF9800", va="bottom")
+                 lw=2.5, label="Welch bound (tight)")
+        # Shade below the curve as "achievable"
+        _ax.fill_between(_deltas[_valid], _np.log10(_N),
+                         _log_welch[_valid], alpha=0.06, color="#FF9800")
 
-    # Reference: DeepSeek-V3 vocab size
-    _ax.axhline(_math.log10(129280), color="#1E88E5", lw=1.5, ls="--",
+    # Vertical asymptote at 1/sqrt(N)
+    _ax.axvline(_welch_limit_deg, color="#FF9800", lw=1.5, ls=":",
+                alpha=0.5)
+
+    # M = N reference (orthogonal set — always achievable)
+    _ax.axhline(_math.log10(_N), color="#43A047", lw=1.5, ls="--",
+                alpha=0.7, label=f"M = N = {_N:,} (orthogonal)")
+
+    # DeepSeek-V3 vocab
+    _ax.axhline(_vocab_log, color="#1E88E5", lw=1.5, ls="--",
                 alpha=0.7, label="DeepSeek-V3 vocab (129K)")
+    if _ds_cross_deg:
+        _ax.plot(_ds_cross_deg, _vocab_log, "o", color="#1E88E5",
+                 ms=8, zorder=5)
+        _ax.annotate(f"{_ds_cross_deg:.2f}°",
+                     (_ds_cross_deg, _vocab_log),
+                     textcoords="offset points", xytext=(8, 8),
+                     fontsize=9, color="#1E88E5")
 
-    # Reference: fp8 noise floor
+    # fp8 noise floor
     if _fp8_noise_deg < _x_max:
         _ax.axvline(_fp8_noise_deg, color="#999", lw=1.5, ls=":",
                     alpha=0.6)
-        _y_top = _log_upper[_log_upper < 1e10].max() if \
-            _np.any(_log_upper < 1e10) else 10
-        _ax.text(_fp8_noise_deg + _x_max * 0.01, _y_top * 0.85,
+        _y_top = _log_welch[_valid].max() if _valid.any() else 6
+        _ax.text(_fp8_noise_deg + _x_max * 0.015, min(_y_top * 0.85, 8),
                  f"fp8 noise\n({_fp8_noise_deg:.3f}°)", fontsize=8,
                  color="#666", va="top")
 
+    # Annotation for exponential regime
+    _ax.text(_welch_limit_deg + _x_max * 0.02, _math.log10(_N) + 0.3,
+             "beyond 1/√N:\nexponentially many\nvectors fit",
+             fontsize=8, color="#FF9800", va="bottom",
+             style="italic")
+
     _ax.set_xlabel("Angle deviation from 90° (degrees)", fontsize=10)
-    _ax.set_ylabel("Number of vectors M  (log₁₀ scale)", fontsize=10)
+    _ax.set_ylabel("Number of vectors M  (log₁₀)", fontsize=10)
     _ax.set_title(
-        f"How many nearly-orthogonal vectors fit in {_N:,} dimensions?",
+        f"How many nearly-orthogonal directions in {_N:,} dimensions?",
         fontsize=11)
     _ax.legend(fontsize=9, loc="upper left")
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
-    _ax.set_ylim(bottom=0)
+    _ax.set_ylim(bottom=max(_math.log10(_N) - 0.5, 0))
     _ax.set_xlim(0, _x_max)
     _plt.tight_layout()
     _plt.close(_fig)
 
     # ── Interpretive text ──
-    # Where does the DeepSeek vocab line cross each bound?
-    # Bounds increase with angle; find smallest angle where bound >= vocab
-    _vocab = _math.log10(129280)
-    _cross_upper = None  # impossible below this angle
-    _cross_lower = None  # achievable above this angle
-    for _i in range(len(_deltas)):
-        if _cross_upper is None and _log_upper[_i] >= _vocab:
-            _cross_upper = float(_deltas[_i])
-        if _cross_lower is None and _log_lower[_i] >= _vocab:
-            _cross_lower = float(_deltas[_i])
-
-    _cross_text = ""
-    if _cross_upper and _cross_lower:
-        _cross_text = f"""
-        The DeepSeek-V3 vocabulary (129K tokens) is guaranteed packable
-        at **{_cross_lower:.1f}°** from orthogonal (lower bound), and
-        provably impossible below **{_cross_upper:.1f}°** (upper bound).
-        Both angles are tiny — the directions barely interfere."""
-    elif _cross_lower:
-        _cross_text = f"""
-        The DeepSeek-V3 vocabulary (129K tokens) is guaranteed packable
-        at **{_cross_lower:.1f}°** from orthogonal — and that's tiny."""
+    _ds_text = ""
+    if _ds_cross_deg:
+        # How close to the Welch limit?
+        _ds_eps = _math.sin(_math.radians(_ds_cross_deg))
+        _ds_frac = _ds_eps / _welch_limit
+        _ds_text = f"""
+        DeepSeek-V3's vocabulary (129K tokens) crosses the Welch bound
+        at **{_ds_cross_deg:.2f}°** — that's **{_ds_frac:.0%}** of the
+        way to the 1/√N limit. The embedding table is nearly as tightly
+        packed as algebra allows."""
 
     mo.vstack([
         _fig,
         mo.md(f"""
-        The grey region is the gap between what we know is achievable
-        (green, [random coding](https://en.wikipedia.org/wiki/Sphere_packing#In_higher_dimensions))
-        and what's provably impossible (red,
-        [sphere packing](https://en.wikipedia.org/wiki/Sphere_packing)).
-        The orange [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
-        is tighter but only works for very small angles (ε < 1/√N).
-        The true maximum lies in the grey region; the best known upper
-        bound ([Kabatiansky–Levenshtein, 1978](https://en.wikipedia.org/wiki/Kabatiansky%E2%80%93Levenshtein_bound))
-        roughly halves the gap.
-        {_cross_text}
+        The [Welch bound](https://en.wikipedia.org/wiki/Welch_bounds)
+        is the tight answer in this regime: given a tolerance of ε on
+        the maximum |cosine| between any pair, at most
+        M = N(1−ε²)/(1−Nε²) directions fit. It starts at M = N
+        (orthogonal set) and diverges at ε = 1/√N = {_welch_limit:.4f}
+        ({_welch_limit_deg:.2f}°).
+        {_ds_text}
 
-        The fp8 noise line ({_fp8_noise_deg:.2f}°) marks where
-        quantization noise in a {_N:,}-dim dot product equals the
-        angular deviation. Below that line, fp8 can't distinguish
-        "nearly orthogonal" from "exactly orthogonal." The packing
-        bounds are comfortably to the right — **fp8 preserves the
-        geometric structure**.
+        Beyond 1/√N, the number of packable directions grows
+        **exponentially** with dimension — bounded above by
+        [Kabatiansky–Levenshtein (1978)](https://en.wikipedia.org/wiki/Kabatiansky%E2%80%93Levenshtein_bound)
+        and below by random coding arguments. The volumetric
+        sphere-packing bound also applies but is astronomically loose
+        at high N (it gives ~10^{int((_N-1)*_math.log10(1/_math.sin(_math.acos(_welch_limit)/2)) + _C_sp)} at
+        the Welch limit for N = {_N:,}).
 
-        Try N = 50 (GloVe) to see how the picture changes in low
-        dimensions: the bounds shift left, angles get larger, and
-        the gap between achievable and impossible widens.
+        The fp8 noise line ({_fp8_noise_deg:.3f}°) marks where
+        quantization noise equals the angular deviation. It's well
+        left of the Welch curve — **fp8 preserves the geometric
+        structure**.
+
+        Try N = 50 to see the bounds at GloVe scale, or N = 2 to
+        watch the asymptote move to 45°.
         """),
     ])
 
