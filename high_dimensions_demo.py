@@ -634,23 +634,28 @@ def _(mo):
         label="Dimensions (N):",
         full_width=True,
     )
-    packing_dim_slider
-    return (packing_dim_slider,)
+    packing_zoom_slider = mo.ui.slider(
+        start=-2, stop=2, step=0.1, value=0.0,
+        label="Zoom (log₁₀ degrees):",
+        full_width=True,
+    )
+    mo.hstack([packing_dim_slider, packing_zoom_slider], widths=[0.5, 0.5])
+    return (packing_dim_slider, packing_zoom_slider,)
 
 
 @app.cell
-def _(packing_dim_slider, mo):
+def _(packing_dim_slider, packing_zoom_slider, mo):
     import numpy as _np
     import matplotlib.pyplot as _plt
     import math as _math
 
     _N = packing_dim_slider.value
 
-    # x-axis: extend to ~8× Welch limit to show exponential regime
     _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
     _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
-    _x_max = max(_welch_limit_deg * 8, 2.0)
-    _deltas = _np.linspace(0.001, _x_max, 800)
+    # Zoom slider: 0 = default (8× Welch), negative = zoom in, positive = zoom out
+    _x_max = max(_welch_limit_deg * 8 * 10**packing_zoom_slider.value, 0.001)
+    _deltas = _np.linspace(0.0001, _x_max, 800)
     _epsilons = _np.sin(_np.radians(_deltas))
 
     # ── Welch bound (tight upper bound on M for eps < 1/sqrt(N)) ──
