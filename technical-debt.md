@@ -23,7 +23,7 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 2 | `embedding_demo.py` | What's an Embedding? | `/embedding` | Deployed |
 | 3 | `dot_product_demo.py` | The Dot Product | `/dot-product` | Deployed (beta) |
 | 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) ✓ |
-| 5 | — | Precision and Energy | — | Planned |
+| 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (alpha) |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | — | PCA | — | Planned |
 | 7 | — | Clustering | — | Planned |
@@ -112,10 +112,14 @@ dwarfs) harvest these ideas.
 
 ## Notebook 5: "Precision and Energy"
 
+Story arc: you've seen that low precision preserves geometry (notebook 4).
+Now: *why* low precision, *how* number formats work, and *what it costs*
+in energy. Develop the clearest story first; redact IP later if needed.
+
 ### Sections:
-1. **Quantize the dot product**: float32, float16, fp8, int8, int4 side by
-   side on same GloVe word pair. Show cosine similarity barely moves at
-   fp8/int8, gets noisy at int4.
+1. **Quantize the dot product**: fp32, fp16, E4M3, E2M5, INT8, E2M1
+   side by side on same GloVe word pair. Interactive: pick two words,
+   see cosine at each precision. The "barely moves" moment.
 2. **The ExMy family and scaling**: all formats are one family — trade
    exponent bits for mantissa bits within a fixed budget. Present the
    full landscape: E1M6 (≈symmetric INT8), E2M5 (inference sweet spot),
@@ -132,11 +136,23 @@ dwarfs) harvest these ideas.
    dense where the data is dense. INT8 codes are uniform → wastes codes
    in the empty middle. Draw clipping boundaries. Interactive: dropdown
    to switch format and watch the clipping line move.
-4. **Energy table**: 50fJ/OP = 100fJ/MAC at 20TOPS/W. Untether "Boqueria"
-   (Speed AI) MLPerf result as existence proof. "We're the inheritors."
-5. **Why custom silicon**: operation is uniform (MAC), precision is low
-   (4–8 bits), volume is enormous. General-purpose hardware wastes energy
-   on flexibility.
+4. **What does a MAC cost?**: gate-level anatomy of a multiply-accumulate.
+   Dadda tree (AND gates → half/full adders → accumulator). Count the
+   gates, show energy per toggle from 5nm cell data (~0.3–1.4 fJ).
+   Component breakdown: multiplier ~7 fJ, shifter ~4 fJ, accumulator
+   ~11 fJ, latches/control ~14 fJ → total ~45 fJ/MAC @0.75V 5nm.
+   Voltage scaling to 0.4V → ~13 fJ/MAC. Process scaling 22nm → ~64 fJ.
+   Source: h0-pe-8b/docs/area-power-estimate.md.
+5. **The energy budget — where do the joules go?**: pie chart of compute
+   vs data movement vs overhead. Fetch dominates: "moving a byte costs
+   more than multiplying it." CRAM + NoC overhead is +30–50 fJ/OP on
+   top of ~32 fJ/OP core. System total: 62–82 fJ/OP → 12–16 TOPS/W.
+   Compare: 4-bit (h0-pe-4b) gets ~7 fJ/cycle → ~63 TOPS/W.
+   Reference Boqueria/Speed AI MLPerf as existence proof.
+6. **Why custom silicon**: the operation is uniform (MAC), precision is
+   low (4–8 bits), volume is enormous. GPUs waste energy on flexibility
+   the workload doesn't need. This is why purpose-built inference
+   silicon can be 10–50× more efficient per watt.
 
 ---
 
