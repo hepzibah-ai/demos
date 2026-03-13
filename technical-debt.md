@@ -22,7 +22,7 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 1 | `tokenizer_demo.py` | What's a Token? | `/tokenizer` | Deployed |
 | 2 | `embedding_demo.py` | What's an Embedding? | `/embedding` | Deployed |
 | 3 | `dot_product_demo.py` | The Dot Product | `/dot-product` | Deployed (beta) |
-| 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) |
+| 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) ✓ |
 | 5 | — | Precision and Energy | — | Planned |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | — | PCA | — | Planned |
