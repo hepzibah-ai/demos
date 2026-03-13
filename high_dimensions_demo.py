@@ -653,9 +653,10 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
 
     _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
     _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
-    # Zoom slider: 0 = default (8× Welch), negative = zoom in, positive = zoom out
-    _x_max = max(_welch_limit_deg * 8 * 10**packing_zoom_slider.value, 0.001)
-    _deltas = _np.linspace(0.0001, _x_max, 800)
+    # Full data range (always 8× Welch); zoom only changes the view
+    _x_data_max = max(_welch_limit_deg * 8, 2.0)
+    _x_view = max(_x_data_max * 10**packing_zoom_slider.value, 0.001)
+    _deltas = _np.linspace(0.0001, _x_data_max, 800)
     _epsilons = _np.sin(_np.radians(_deltas))
 
     # ── Welch bound (tight upper bound on M for eps < 1/sqrt(N)) ──
@@ -796,10 +797,10 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
     # Quantization noise floors
     _noise_y_top = _log_rc.max() * 0.97
     for _qi, (_fname, _ndeg, _ncol) in enumerate(_noise_lines):
-        if _ndeg < _x_max:
+        if _ndeg < _x_view:
             _ax.axvline(_ndeg, color=_ncol, lw=1.5, ls=":", alpha=0.6)
             _y_pos = _noise_y_top - _qi * (_log_rc.max() * 0.055)
-            _ax.text(_ndeg + _x_max * 0.008, _y_pos,
+            _ax.text(_ndeg + _x_view * 0.008, _y_pos,
                      f"{_fname}\n({_ndeg:.3f}°)", fontsize=7,
                      color=_ncol, va="top", fontweight="bold")
 
@@ -812,7 +813,7 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
     _ax.set_ylim(bottom=max(_math.log10(_N) - 0.5, 0))
-    _ax.set_xlim(0, _x_max)
+    _ax.set_xlim(0, _x_view)
     _plt.tight_layout()
     _plt.close(_fig)
 
