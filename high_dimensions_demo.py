@@ -653,10 +653,9 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
 
     _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
     _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
-    # Full data range (always 8× Welch); zoom only changes the view
-    _x_data_max = max(_welch_limit_deg * 8, 2.0)
-    _x_view = max(_x_data_max * 10**packing_zoom_slider.value, 0.001)
-    _deltas = _np.linspace(0.0001, _x_data_max, 800)
+    # Zoom slider scales the x-axis range; plot size stays fixed
+    _x_view = max(_welch_limit_deg * 8 * 10**packing_zoom_slider.value, 0.001)
+    _deltas = _np.linspace(0.0001, _x_view, 800)
     _epsilons = _np.sin(_np.radians(_deltas))
 
     # ── Welch bound (tight upper bound on M for eps < 1/sqrt(N)) ──
