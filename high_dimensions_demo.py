@@ -653,9 +653,13 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
 
     _welch_limit = 1.0 / _math.sqrt(_N) if _N > 1 else 1.0
     _welch_limit_deg = _math.degrees(_math.asin(min(_welch_limit, 1.0)))
-    # Zoom slider scales the x-axis range; plot size stays fixed
-    _x_view = max(_welch_limit_deg * 8 * 10**packing_zoom_slider.value, 0.001)
+    # Zoom slider scales the x-axis range; plot pixel size stays fixed
+    _x_full = max(_welch_limit_deg * 8, 2.0)       # full (un-zoomed) range
+    _x_view = max(_x_full * 10**packing_zoom_slider.value, 0.001)
     _deltas = _np.linspace(0.0001, _x_view, 800)
+    # Fixed y-top from full range (so zooming doesn't collapse the y-axis)
+    _eps_full = _math.sin(_math.radians(_x_full))
+    _y_top = _N * _eps_full**2 / (4 * _math.log(10))  # RC bound at full range
     _epsilons = _np.sin(_np.radians(_deltas))
 
     # ── Welch bound (tight upper bound on M for eps < 1/sqrt(N)) ──
@@ -752,7 +756,7 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
             _ds_cross_rc = float(_deltas[_i])
 
     # ── Plot ──
-    _fig, _ax = _plt.subplots(figsize=(10, 5.5))
+    _fig, _ax = _plt.subplots(figsize=(10, 5.5), constrained_layout=True)
 
     # Random coding lower bound — the exponential curve
     _ax.plot(_deltas, _log_rc, color="#43A047", lw=2,
@@ -794,11 +798,11 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
                      fontsize=9, color="#43A047")
 
     # Quantization noise floors
-    _noise_y_top = _log_rc.max() * 0.97
+    _noise_y_top = _y_top * 0.97
     for _qi, (_fname, _ndeg, _ncol) in enumerate(_noise_lines):
         if _ndeg < _x_view:
             _ax.axvline(_ndeg, color=_ncol, lw=1.5, ls=":", alpha=0.6)
-            _y_pos = _noise_y_top - _qi * (_log_rc.max() * 0.055)
+            _y_pos = _noise_y_top - _qi * (_y_top * 0.055)
             _ax.text(_ndeg + _x_view * 0.008, _y_pos,
                      f"{_fname}\n({_ndeg:.3f}°)", fontsize=7,
                      color=_ncol, va="top", fontweight="bold")
@@ -811,9 +815,9 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
     _ax.legend(fontsize=9, loc="upper left")
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
-    _ax.set_ylim(bottom=max(_math.log10(_N) - 0.5, 0))
+    _y_bottom = max(_math.log10(_N) - 0.5, 0)
+    _ax.set_ylim(_y_bottom, max(_y_top * 1.05, _y_bottom + 2))
     _ax.set_xlim(0, _x_view)
-    _plt.tight_layout()
     _plt.close(_fig)
 
     # ── Interpretive text ──
