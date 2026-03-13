@@ -822,8 +822,7 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
     # Render to PNG at fixed pixel size so marimo can't rescale it
     import io as _io
     _buf = _io.BytesIO()
-    _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight",
-                 pad_inches=0.3)
+    _fig.savefig(_buf, format="png", dpi=150)
     _plt.close(_fig)
     _buf.seek(0)
     _plot_img = mo.image(_buf.read(), width=900)
