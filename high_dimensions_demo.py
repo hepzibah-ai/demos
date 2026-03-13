@@ -818,7 +818,15 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
     _y_bottom = max(_math.log10(_N) - 0.5, 0)
     _ax.set_ylim(_y_bottom, max(_y_top * 1.05, _y_bottom + 2))
     _ax.set_xlim(0, _x_view)
+
+    # Render to PNG at fixed pixel size so marimo can't rescale it
+    import io as _io
+    _buf = _io.BytesIO()
+    _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight",
+                 pad_inches=0.3)
     _plt.close(_fig)
+    _buf.seek(0)
+    _plot_img = mo.image(_buf.read(), width=900)
 
     # ── Interpretive text ──
     _ds_text = ""
@@ -834,7 +842,7 @@ def _(packing_dim_slider, packing_zoom_slider, mo):
         count is achievable by **{_ds_cross_rc:.1f}°**."""
 
     mo.vstack([
-        _fig,
+        _plot_img,
         mo.md(f"""
         Two regimes, separated by the vertical line at 1/√N =
         {_welch_limit:.4f} ({_welch_limit_deg:.2f}°):
