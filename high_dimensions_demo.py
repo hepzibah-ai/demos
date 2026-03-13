@@ -673,9 +673,67 @@ def _(packing_dim_slider, mo):
     # Floor at N (orthogonal vectors always exist)
     _log_rc = _np.maximum(_log_rc, _math.log10(_N))
 
-    # ── fp8 dot-product noise as angle ──
-    _fp8_noise_cos = 2**(-4) * _math.sqrt(2.0 / (3 * _N)) if _N > 1 else 1.0
-    _fp8_noise_deg = _math.degrees(_math.asin(min(_fp8_noise_cos, 1.0)))
+    # ── Quantization noise as angle (numerical, per-vector scaling) ──
+    # All formats: subnormals present, no NaN, no infinities.
+
+    def _build_format_values(_ebits, _mbits):
+        """Non-negative representable values for ExMy (no NaN/Inf)."""
+        _bias = 2**(_ebits - 1) - 1
+        _max_e = (1 << _ebits) - 1
+        _vals = set()
+        for _m in range(1 << _mbits):  # subnormals (e=0)
+            _vals.add(2.0**(1 - _bias) * (_m / (1 << _mbits)))
+        for _e in range(1, _max_e + 1):  # normals
+            for _m in range(1 << _mbits):
+                _vals.add(2.0**(_e - _bias) * (1.0 + _m / (1 << _mbits)))
+        return _np.array(sorted(_vals))
+
+    def _quantize(_x, _pos_vals):
+        """Round-to-nearest, clip to ±max."""
+        _s = _np.sign(_x)
+        _a = _np.clip(_np.abs(_x), 0, _pos_vals[-1])
+        _idx = _np.searchsorted(_pos_vals, _a)
+        _idx = _np.clip(_idx, 0, len(_pos_vals) - 1)
+        _lo = _np.clip(_idx - 1, 0, len(_pos_vals) - 1)
+        _d_lo = _np.abs(_a - _pos_vals[_lo])
+        _d_hi = _np.abs(_a - _pos_vals[_idx])
+        _best = _np.where(_d_lo <= _d_hi, _lo, _idx)
+        return _pos_vals[_best] * _s
+
+    def _dot_noise_deg(_ebits, _mbits, _dim, _n_trials=500):
+        """Monte Carlo: RMS cosine error from quantizing both operands."""
+        _rng = _np.random.default_rng(42)
+        _pv = _build_format_values(_ebits, _mbits)
+        _errs = []
+        for _ in range(_n_trials):
+            _a = _rng.standard_normal(_dim)
+            _b = _rng.standard_normal(_dim)
+            _a = _a / _np.linalg.norm(_a)
+            _b = _b / _np.linalg.norm(_b)
+            _exact = float(_np.dot(_a, _b))
+            # Per-vector absmax scaling: map peak to max representable
+            _sa = _pv[-1] / _np.abs(_a).max()
+            _sb = _pv[-1] / _np.abs(_b).max()
+            _aq = _quantize(_a * _sa, _pv) / _sa
+            _bq = _quantize(_b * _sb, _pv) / _sb
+            _approx = float(_np.dot(_aq, _bq))
+            _errs.append(_approx - _exact)
+        _sigma_cos = float(_np.std(_errs))
+        return _math.degrees(_math.asin(min(_sigma_cos, 1.0)))
+
+    # (name, ebits, mbits, color)
+    _quant_formats = [
+        ("E1M6 (8b)", 1, 6, "#90A4AE"),
+        ("E2M5 (8b)", 2, 5, "#78909C"),
+        ("E4M3 (8b)", 4, 3, "#546E7A"),
+        ("E5M2 (8b)", 5, 2, "#455A64"),
+        ("E2M3 (6b)", 2, 3, "#37474F"),
+        ("E2M1 (4b)", 2, 1, "#263238"),
+    ]
+    _noise_lines = []
+    for _fname, _eb, _mb, _color in _quant_formats:
+        _deg = _dot_noise_deg(_eb, _mb, _N) if _N >= 4 else 90.0
+        _noise_lines.append((_fname, _deg, _color))
 
     # ── Where does DeepSeek vocab cross each curve? ──
     _vocab_log = _math.log10(129280)
@@ -730,14 +788,15 @@ def _(packing_dim_slider, mo):
                      textcoords="offset points", xytext=(8, -12),
                      fontsize=9, color="#43A047")
 
-    # fp8 noise floor
-    if _fp8_noise_deg < _x_max:
-        _ax.axvline(_fp8_noise_deg, color="#999", lw=1.5, ls=":",
-                    alpha=0.5)
-        _ax.text(_fp8_noise_deg + _x_max * 0.01,
-                 _log_rc.max() * 0.92,
-                 f"fp8 noise\n({_fp8_noise_deg:.3f}°)", fontsize=8,
-                 color="#666", va="top")
+    # Quantization noise floors
+    _noise_y_top = _log_rc.max() * 0.97
+    for _qi, (_fname, _ndeg, _ncol) in enumerate(_noise_lines):
+        if _ndeg < _x_max:
+            _ax.axvline(_ndeg, color=_ncol, lw=1.5, ls=":", alpha=0.6)
+            _y_pos = _noise_y_top - _qi * (_log_rc.max() * 0.055)
+            _ax.text(_ndeg + _x_max * 0.008, _y_pos,
+                     f"{_fname}\n({_ndeg:.3f}°)", fontsize=7,
+                     color=_ncol, va="top", fontweight="bold")
 
     _ax.set_xlabel("Angle deviation from 90° (degrees)", fontsize=10)
     _ax.set_ylabel("Number of vectors M  (log₁₀)", fontsize=10)
@@ -786,8 +845,12 @@ def _(packing_dim_slider, mo):
         [Kabatiansky–Levenshtein (1978)](https://en.wikipedia.org/wiki/Kabatiansky%E2%80%93Levenshtein_bound).
         {_ds_text}
 
-        The fp8 noise line ({_fp8_noise_deg:.3f}°) is far left of both
-        curves — **fp8 preserves the geometric structure**.
+        The vertical dotted lines show dot-product noise for different
+        number formats (per-vector absmax scaling, both operands quantized).
+        E1M6 ≈ symmetric INT8; E2M5 is popular for inference; E5M2 for
+        training (gradient dynamic range). All 8-bit and 6-bit formats
+        land far left of the bounds. Even E2M1 (4-bit!) barely dents
+        the geometry — **low-precision arithmetic preserves the structure**.
 
         Try N = 50 to see the bounds at GloVe scale.
         """),

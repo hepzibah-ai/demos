@@ -116,18 +116,25 @@ dwarfs) harvest these ideas.
 1. **Quantize the dot product**: float32, float16, fp8, int8, int4 side by
    side on same GloVe word pair. Show cosine similarity barely moves at
    fp8/int8, gets noisy at int4.
-2. **Distribution meets number format**: bring back the log-log survival
+2. **The ExMy family and scaling**: all formats are one family — trade
+   exponent bits for mantissa bits within a fixed budget. Present the
+   full landscape: E1M6 (≈symmetric INT8), E2M5 (inference sweet spot),
+   E4M3 (OCP standard), E5M2 (training — gradient dynamic range),
+   E2M3 (6b), E2M1 (4b/MXFP4). Interactive sweep of scale factor
+   (2σ–5σ + peak) vs RMS error for Gaussian data — shows that optimal
+   scaling depends on both format and data distribution. E2M5 beats E4M3
+   by ~3.5× at optimal scaling; E2M3 is worse than E4M3 despite same
+   mantissa (subnormal degradation from narrow exponent). Starter code
+   in `scratch/quant_noise_test.py`.
+3. **Distribution meets number format**: bring back the log-log survival
    plot from notebook 4. Overlay representable values for each format
-   (fp32, fp16, fp8, int8, int4) as tick marks or code-density rug plot.
-   fp8's codes are log-spaced → dense where the data is dense, sparse
-   where it's sparse. int8's codes are uniform → wastes codes in the empty
-   middle, runs out in the tails. Draw clipping boundaries. Interactive:
-   slider or dropdown to switch format and watch the clipping line move.
-   (Use standard E4M3/E5M2 fp8 — our specific implementation stays in
-   sim0.)
-3. **Energy table**: 50fJ/OP = 100fJ/MAC at 20TOPS/W. Untether "Boqueria"
+   as tick marks or code-density rug plot. fp codes are log-spaced →
+   dense where the data is dense. INT8 codes are uniform → wastes codes
+   in the empty middle. Draw clipping boundaries. Interactive: dropdown
+   to switch format and watch the clipping line move.
+4. **Energy table**: 50fJ/OP = 100fJ/MAC at 20TOPS/W. Untether "Boqueria"
    (Speed AI) MLPerf result as existence proof. "We're the inheritors."
-4. **Why custom silicon**: operation is uniform (MAC), precision is low
+5. **Why custom silicon**: operation is uniform (MAC), precision is low
    (4–8 bits), volume is enormous. General-purpose hardware wastes energy
    on flexibility.
 
