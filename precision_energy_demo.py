@@ -503,6 +503,55 @@ def _(mo):
     ])
 
 
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ### The table everyone cites — and what's changed
+
+        In 2014, Mark Horowitz presented this table at ISSCC. It became
+        the standard reference for "what does compute cost?" It's roughly
+        right for 45nm general-purpose logic at 0.9V — but it's two
+        decades old, and it gets misapplied to modern inference hardware
+        constantly.
+
+        Here it is alongside our 5nm numbers at 0.4V. These aren't
+        apples-to-apples — that's the point. The algorithms have changed
+        (fp32 → fp8), the architectures have changed (general-purpose →
+        purpose-built), and the technology has changed (45nm/0.9V →
+        5nm/0.4V). The right question has shifted from "what does a
+        32-bit multiply cost?" to "what does an 8-bit MAC cost, including
+        everything around it?"
+
+        | Operation | Horowitz 2014 | H0 PE | | Notes |
+        | | 45nm, 0.9V | 5nm, 0.4V | | |
+        |---|---|---|---|---|
+        | 8-bit int add | 30 fJ | ~2 fJ | | FA-based, ×0.284 voltage, ~5× process |
+        | 8-bit int multiply | 200 fJ | 2.0 fJ | | 4×4 Dadda tree |
+        | 32-bit int add | 100 fJ | — | | not a useful operation for inference |
+        | 32-bit FP multiply | 3,700 fJ | — | | not a useful operation for inference |
+        | **FP8 E4M3 multiply** | — | **4.6 fJ** | | mult + field extract + exponent logic |
+        | **FP8 E4M3 MAC** | — | **12.8 fJ** | | full datapath including accumulator |
+        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | | 5nm SRAM, 32-bit word |
+        | 32-bit DRAM read | 640,000 fJ | 160,000 fJ | ⚠ | LPDDR/HBM, long sequential reads |
+
+        ⚠ DRAM energy is per-access for sustained sequential reads,
+        not random access. HBM is broadly similar per bit moved.
+
+        The story: Horowitz showed that **data movement dominates
+        compute**. That's still true — but the ratio has shifted. With
+        8-bit MACs at 5 fJ and SRAM at 20 fJ, compute is now cheap
+        enough that the entire design challenge is keeping the datapath
+        fed. Every architectural decision we make is about minimizing
+        data movement.
+
+        *Source: M. Horowitz,
+        ["Computing's Energy Problem (and what we can do about it),"](https://gwern.net/doc/cs/hardware/2014-horowitz-2.pdf)
+        ISSCC 2014.*
+        """
+    )
+
+
 # ── §5  Where do the joules go? ──
 
 
