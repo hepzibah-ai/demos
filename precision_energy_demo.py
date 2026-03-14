@@ -57,51 +57,60 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    _w1 = mo.ui.text(value="king", label="Word 1:", full_width=False)
-    _w2 = mo.ui.text(value="queen", label="Word 2:", full_width=False)
-    mo.hstack([_w1, _w2], gap=1)
-    return (_w1, _w2)
+    word1_input = mo.ui.text(value="king", label="Word 1:", full_width=False)
+    word2_input = mo.ui.text(value="queen", label="Word 2:", full_width=False)
+    mo.hstack([word1_input, word2_input], gap=1)
+    return (word1_input, word2_input)
 
 
 @app.cell
-def _(_w1, _w2, mo):
-    import numpy as _np
-    import gensim.downloader as _api
+def _(mo):
+    """Load GloVe model and define quantizer helpers (shared across notebook)."""
+    import numpy as np
+    import gensim.downloader as api
 
-    _model = _api.load("glove-wiki-gigaword-50")
+    glove_model = api.load("glove-wiki-gigaword-50")
 
-    # ── Quantizer helpers (shared across sections) ──
-
-    def _build_format_values(_ebits, _mbits):
+    def build_format_values(ebits, mbits):
         """Non-negative representable values for ExMy (no NaN/Inf, with subnormals)."""
-        _bias = 2**(_ebits - 1) - 1
-        _max_e = (1 << _ebits) - 1
-        _vals = set()
-        for _m in range(1 << _mbits):
-            _vals.add(2.0**(1 - _bias) * (_m / (1 << _mbits)))
-        for _e in range(1, _max_e + 1):
-            for _m in range(1 << _mbits):
-                _vals.add(2.0**(_e - _bias) * (1.0 + _m / (1 << _mbits)))
-        return _np.array(sorted(_vals))
+        bias = 2**(ebits - 1) - 1
+        max_e = (1 << ebits) - 1
+        vals = set()
+        for m in range(1 << mbits):
+            vals.add(2.0**(1 - bias) * (m / (1 << mbits)))
+        for e in range(1, max_e + 1):
+            for m in range(1 << mbits):
+                vals.add(2.0**(e - bias) * (1.0 + m / (1 << mbits)))
+        return np.array(sorted(vals))
 
-    def _quantize(_x, _pv):
+    def quantize(x, pv):
         """Round-to-nearest, clip to ±max."""
-        _s = _np.sign(_x)
-        _a = _np.clip(_np.abs(_x), 0, _pv[-1])
-        _idx = _np.searchsorted(_pv, _a)
-        _idx = _np.clip(_idx, 0, len(_pv) - 1)
-        _lo = _np.clip(_idx - 1, 0, len(_pv) - 1)
-        _d_lo = _np.abs(_a - _pv[_lo])
-        _d_hi = _np.abs(_a - _pv[_idx])
-        _best = _np.where(_d_lo <= _d_hi, _lo, _idx)
-        return _pv[_best] * _s
+        s = np.sign(x)
+        a = np.clip(np.abs(x), 0, pv[-1])
+        idx = np.searchsorted(pv, a)
+        idx = np.clip(idx, 0, len(pv) - 1)
+        lo = np.clip(idx - 1, 0, len(pv) - 1)
+        d_lo = np.abs(a - pv[lo])
+        d_hi = np.abs(a - pv[idx])
+        best = np.where(d_lo <= d_hi, lo, idx)
+        return pv[best] * s
 
-    def _quantize_vec(_v, _pv):
+    def quantize_vec(v, pv):
         """Per-vector absmax scaling then quantize."""
-        _scale = _pv[-1] / _np.abs(_v).max()
-        return _quantize(_v * _scale, _pv) / _scale
+        scale = pv[-1] / np.abs(v).max()
+        return quantize(v * scale, pv) / scale
 
-    # Format definitions used throughout notebook
+    mo.md("*Loading GloVe model...*")
+
+    return (build_format_values, glove_model, quantize, quantize_vec)
+
+
+@app.cell
+def _(word1_input, word2_input, build_format_values, quantize_vec,
+      glove_model, mo):
+    import numpy as _np
+
+    # Format definitions
     _formats = [
         ("fp32",     None, None),
         ("E5M2 (8b)", 5, 2),
@@ -112,15 +121,15 @@ def _(_w1, _w2, mo):
         ("E2M1 (4b)", 2, 1),
     ]
 
-    _word1 = _w1.value.strip().lower()
-    _word2 = _w2.value.strip().lower()
+    _word1 = word1_input.value.strip().lower()
+    _word2 = word2_input.value.strip().lower()
 
-    if _word1 not in _model or _word2 not in _model:
-        _missing = [w for w in [_word1, _word2] if w not in _model]
+    if _word1 not in glove_model or _word2 not in glove_model:
+        _missing = [w for w in [_word1, _word2] if w not in glove_model]
         mo.md(f"**Word not in vocabulary:** {', '.join(_missing)}")
     else:
-        _v1 = _model[_word1].astype(_np.float64)
-        _v2 = _model[_word2].astype(_np.float64)
+        _v1 = glove_model[_word1].astype(_np.float64)
+        _v2 = glove_model[_word2].astype(_np.float64)
 
         _exact = float(_np.dot(_v1, _v2) / (_np.linalg.norm(_v1) * _np.linalg.norm(_v2)))
 
@@ -131,9 +140,9 @@ def _(_w1, _w2, mo):
                 _bits = 32
                 _err = 0.0
             else:
-                _pv = _build_format_values(_eb, _mb)
-                _q1 = _quantize_vec(_v1, _pv)
-                _q2 = _quantize_vec(_v2, _pv)
+                _pv = build_format_values(_eb, _mb)
+                _q1 = quantize_vec(_v1, _pv)
+                _q2 = quantize_vec(_v2, _pv)
                 _cos = float(_np.dot(_q1, _q2) / (_np.linalg.norm(_q1) * _np.linalg.norm(_q2)))
                 _bits = 1 + _eb + _mb
                 _err = abs(_cos - _exact)
@@ -150,8 +159,6 @@ def _(_w1, _w2, mo):
         is close. Only at 4-bit (E2M1) does the error become visible —
         and it's still small.
         """)
-
-    return (_build_format_values, _formats, _model, _quantize, _quantize_vec)
 
 
 # ── §2  The ExMy family and scaling ──
@@ -187,7 +194,7 @@ def _(mo):
 
 
 @app.cell
-def _(scale_slider, _build_format_values, _quantize, mo):
+def _(scale_slider, build_format_values, quantize, mo):
     import numpy as _np
     import matplotlib.pyplot as _plt
     import io as _io
@@ -210,11 +217,11 @@ def _(scale_slider, _build_format_values, _quantize, mo):
     _scale_range = _np.arange(2.0, 5.6, 0.1)
     _results = {}
     for _fname, _eb, _mb, _col in _fmt_list:
-        _pv = _build_format_values(_eb, _mb)
+        _pv = build_format_values(_eb, _mb)
         _errs = []
         for _s in _scale_range:
             _scale = _pv[-1] / (_s * _sigma)
-            _q = _quantize(_x * _scale, _pv) / _scale
+            _q = quantize(_x * _scale, _pv) / _scale
             _errs.append(float(_np.sqrt(_np.mean((_q - _x)**2))))
         _results[_fname] = (_errs, _col)
 
@@ -241,9 +248,9 @@ def _(scale_slider, _build_format_values, _quantize, mo):
     _vals = []
     _cols = []
     for _fname, _eb, _mb, _col in _fmt_list:
-        _pv = _build_format_values(_eb, _mb)
+        _pv = build_format_values(_eb, _mb)
         _scale = _pv[-1] / (_sf * _sigma)
-        _q = _quantize(_x * _scale, _pv) / _scale
+        _q = quantize(_x * _scale, _pv) / _scale
         _err = float(_np.sqrt(_np.mean((_q - _x)**2)))
         _names.append(_fname)
         _vals.append(_err)
@@ -311,14 +318,14 @@ def _(mo):
 
 
 @app.cell
-def _(fmt_dropdown, _build_format_values, _model, mo):
+def _(fmt_dropdown, build_format_values, glove_model, mo):
     import numpy as _np
     import matplotlib.pyplot as _plt
     import io as _io
 
     # Gather GloVe coordinates
-    _words = list(_model.key_to_index.keys())[:5000]
-    _vecs = _np.array([_model[w] for w in _words])
+    _words = list(glove_model.key_to_index.keys())[:5000]
+    _vecs = _np.array([glove_model[w] for w in _words])
     _coords = _vecs.flatten()
     _sigma = _coords.std()
 
@@ -328,7 +335,7 @@ def _(fmt_dropdown, _build_format_values, _model, mo):
         "E2M3 (6b)": (2, 3), "E2M1 (4b)": (2, 1),
     }
     _eb, _mb = _fmt_map[fmt_dropdown.value]
-    _pv = _build_format_values(_eb, _mb)
+    _pv = build_format_values(_eb, _mb)
     _bits = 1 + _eb + _mb
 
     # Scale: 3.5σ → max representable
