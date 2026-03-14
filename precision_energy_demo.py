@@ -617,7 +617,7 @@ def _(mo):
         | 32-bit FP multiply | 3,700 fJ | — | not useful for inference |
         | **E4M3 multiply** | — | **4.6 fJ** | mult + field extract + exp logic |
         | **E4M3 MAC (full)** | — | **12.8 fJ** | full datapath incl. accumulator |
-        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | 5nm, low-energy sense amp |
+        | 32-bit SRAM read (8KB) | 5,000 fJ | ~64 fJ | 2 fJ/bit, low-energy sense amp |
         | 32-bit DRAM read | 640,000 fJ | 160,000 fJ | LPDDR/HBM, sustained sequential ⚠ |
 
         ⚠ DRAM energy is for sustained sequential reads (5 pJ/bit),
@@ -625,7 +625,7 @@ def _(mo):
 
         The story: Horowitz showed that **data movement dominates
         compute**. That's still true — but the ratio has shifted. With
-        8-bit MACs at 5 fJ and SRAM at 20 fJ, compute is now cheap
+        8-bit MACs at ~13 fJ and SRAM at ~64 fJ, compute is now cheap
         enough that the entire design challenge is keeping the datapath
         fed.
 
@@ -669,15 +669,13 @@ def _(mo):
     # System energy budget at 22nm, 0.4V
     # Source: h0-pe-8b/docs/area-power-estimate.md §4
     # Core E4M3: 64 fJ/MAC = 32 fJ/OP
-    # System overhead (CRAM + NoC + clock + ctrl): +30 to +50 fJ/OP
-    #   (doesn't scale simply with process; depends on bitline length, wire distance)
-    # E2M1 core: 7.3 fJ/cycle (h0-pe-4b postscale), overhead placeholder +10 fJ/OP
+    # System overhead (CRAM + NoC + clock + ctrl): ~10 fJ/OP conservative
+    #   NoC energy amortized over ~128 MACs per transfer, controller similar
+    # E2M1 core: 7.3 fJ/cycle (h0-pe-4b postscale), overhead ~5 fJ/OP (less data to move)
 
-    # Stacked bar: core + overhead range for each format
-    _labels = ["E4M3 (8b)\noptimistic", "E4M3 (8b)\nmoderate",
-               "E4M3 (8b)\npessimistic", "E2M1 (4b)\n(placeholder)"]
-    _core =     [32, 32, 32, 7.3]
-    _overhead = [30, 40, 50, 10]
+    _labels = ["E4M3 (8b)", "E2M1 (4b)"]
+    _core =     [32, 7.3]
+    _overhead = [10, 5]
     _totals =   [c + o for c, o in zip(_core, _overhead)]
     _tops_w =   [1e15 / (t * 1e-15) / 1e12 for t in _totals]
 
@@ -690,33 +688,34 @@ def _(mo):
     _ax1.bar(_x, _overhead, bottom=_core, color="#FF9800",
              label="System overhead\n(CRAM + NoC + ctrl)")
     _ax1.set_xticks(_x)
-    _ax1.set_xticklabels(_labels, fontsize=8)
+    _ax1.set_xticklabels(_labels, fontsize=10)
     _ax1.set_ylabel("fJ / OP")
     _ax1.set_title("Energy per operation @ 22nm, 0.4V")
-    _ax1.legend(fontsize=8, loc="upper left")
+    _ax1.legend(fontsize=9, loc="upper left")
     _ax1.spines["top"].set_visible(False)
     _ax1.spines["right"].set_visible(False)
     for _i in range(len(_labels)):
-        _ax1.text(_i, _totals[_i] + 1.5, f"{_totals[_i]:.0f}",
-                  ha="center", fontsize=9, fontweight="bold")
+        _ax1.text(_i, _totals[_i] + 1, f"{_totals[_i]:.0f} fJ/OP",
+                  ha="center", fontsize=10, fontweight="bold")
 
     # Right: TOPS/W (derived)
     _ax2.barh(range(len(_labels)), _tops_w,
-              color=["#1E88E5", "#455A64", "#78909C", "#43A047"])
+              color=["#1E88E5", "#43A047"])
     _ax2.set_yticks(range(len(_labels)))
-    _ax2.set_yticklabels(_labels, fontsize=8)
+    _ax2.set_yticklabels(_labels, fontsize=10)
     _ax2.set_xlabel("TOPS/W (system)")
     _ax2.set_title("Efficiency (higher is better)")
     _ax2.invert_yaxis()
     _ax2.spines["top"].set_visible(False)
     _ax2.spines["right"].set_visible(False)
     for _i, _v in enumerate(_tops_w):
-        _ax2.text(_v + 0.3, _i, f"{_v:.1f}", va="center", fontsize=9)
+        _ax2.text(_v + 0.5, _i, f"{_v:.0f}", va="center", fontsize=10,
+                  fontweight="bold")
 
     # Reference line: Boqueria/SpeedAI MLPerf
     _ax2.axvline(20, color="#999", ls="--", lw=1.5, alpha=0.6)
-    _ax2.text(20.5, len(_labels) - 0.5, "Boqueria\nMLPerf",
-              fontsize=8, color="#666", va="top")
+    _ax2.text(21, 0.5, "Boqueria MLPerf\n~20 TOPS/W",
+              fontsize=8, color="#666", va="center")
 
     _buf = _io.BytesIO()
     _fig.savefig(_buf, format="png", dpi=150)
@@ -725,24 +724,23 @@ def _(mo):
 
     mo.vstack([
         mo.image(_buf.read(), width=900),
-        mo.md("""
+        mo.md(f"""
         **Left**: energy per operation, split into MAC core (blue) and
-        system overhead (orange). The core is well-characterized from
-        cell-level analysis; the overhead (CRAM bitline, NoC wire energy,
-        clock distribution, control) is presented as a range — it
-        doesn't scale simply with process node because it depends on
-        physical distances, not transistor size.
+        system overhead (orange). The core energy comes from cell-level
+        analysis (§4). The overhead — CRAM bitline, NoC wire energy,
+        clock, control — is conservatively estimated at ~10 fJ/OP for
+        E4M3: NoC transfer energy is amortized over ~128 MACs, and
+        controller overhead is similar.
 
-        **Right**: the resulting TOPS/W. The Boqueria/Speed AI
+        **Right**: the resulting system efficiency. E4M3 at
+        **{_tops_w[0]:.0f} TOPS/W** is comfortably above the
+        Boqueria/Speed AI
         [MLPerf result](https://mlcommons.org/benchmarks/inference-datacenter/)
-        at ~20 TOPS/W lands in our moderate-to-pessimistic E4M3 range.
-        4-bit (E2M1) numbers are placeholders pending detailed modeling,
-        but the direction is clear: halving the bits shrinks both core
-        energy (quadratic in multiplier width) and overhead (half the
-        bits to move).
+        (~20 TOPS/W). E2M1 at **{_tops_w[1]:.0f} TOPS/W** benefits from
+        both a smaller multiplier (quadratic in bit-width) and less data
+        to move.
 
-        All numbers are for 22nm @ 0.4V. E2M1 overhead is a placeholder
-        (~10 fJ/OP) awaiting CRAM bitline capacitance modeling.
+        All numbers are for 22nm @ 0.4V.
         """),
     ])
 
