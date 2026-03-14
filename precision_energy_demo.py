@@ -372,34 +372,36 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
     _gaps = _np.diff(_pv)
     _midpoints = (_pv[:-1] + _pv[1:]) / 2
     _density = 1.0 / _gaps  # codes per unit
-    # Normalize so area ≈ 1 (like a distribution)
-    _density_norm = _density / (_density * _gaps).sum()
+    # Normalize to peak=1 for shape comparison (absolute scale differs wildly)
+    _density_peak = _density / _density.max()
 
     # Data histogram for overlay (on same linear scale)
     _hist_vals, _hist_edges = _np.histogram(_abs_scaled, bins=80, density=True)
     _hist_centers = (_hist_edges[:-1] + _hist_edges[1:]) / 2
+    # Normalize to peak=1
+    _hist_peak = _hist_vals / (_hist_vals.max() if _hist_vals.max() > 0 else 1)
 
     # ── Two-panel figure ──
     _fig, (_ax1, _ax2) = _plt.subplots(2, 1, figsize=(10, 8),
                                         constrained_layout=True,
                                         gridspec_kw={"height_ratios": [1, 0.8]})
 
-    # Top: linear picket fence + code density + data distribution
+    # Top: linear picket fence + code density + data distribution (both peak-normalized)
     # Picket fence
     for _v in _pv[1:]:
         _ax1.axvline(_v, color="#43A047", alpha=0.25, lw=0.5, ymin=0, ymax=0.15)
-    # Code density curve
-    _ax1.plot(_midpoints, _density_norm, color="#43A047", lw=2,
-              label="Code density (1/gap, normalized)")
-    # Data distribution
-    _ax1.fill_between(_hist_centers, _hist_vals, alpha=0.15, color="#E53935")
-    _ax1.plot(_hist_centers, _hist_vals, color="#E53935", lw=1.5,
-              label="|GloVe coordinates| (scaled)", alpha=0.8)
+    # Code density curve (peak=1)
+    _ax1.plot(_midpoints, _density_peak, color="#43A047", lw=2,
+              label="Code density (shape)")
+    # Data distribution (peak=1)
+    _ax1.fill_between(_hist_centers, _hist_peak, alpha=0.15, color="#E53935")
+    _ax1.plot(_hist_centers, _hist_peak, color="#E53935", lw=1.5,
+              label="Data distribution (shape)", alpha=0.8)
     # Clipping boundary
     _ax1.axvline(_pv[-1], color="#43A047", lw=2, ls="--", alpha=0.7)
 
     _ax1.set_xlabel("|x|", fontsize=10)
-    _ax1.set_ylabel("Density", fontsize=10)
+    _ax1.set_ylabel("Relative density (peak = 1)", fontsize=10)
     _ax1.set_title(f"{fmt_dropdown.value} — code density vs data distribution "
                    f"(linear scale)", fontsize=11)
     _ax1.legend(fontsize=9)
@@ -426,7 +428,7 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
 
     # Code density + data density on twin axis (log scale)
     _ax2r = _ax2.twinx()
-    _ax2r.loglog(_midpoints, _density_norm, color="#43A047", lw=1.5,
+    _ax2r.loglog(_midpoints, _density, color="#43A047", lw=1.5,
                  alpha=0.6, label="Code density")
     # Data density (KDE-like: histogram on log-spaced bins, normalized)
     _log_bins = _np.logspace(_np.log10(max(_abs_scaled[_abs_scaled > 0].min(), 1e-4)),
