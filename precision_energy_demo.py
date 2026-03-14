@@ -125,8 +125,6 @@ def _(mo):
         scale = pv[-1] / np.abs(v).max()
         return quantize(v * scale, pv) / scale
 
-    mo.md("*Loading GloVe model...*")
-
     return (build_format_values, glove_model, quantize, quantize_vec)
 
 
@@ -333,9 +331,9 @@ def _(mo):
 @app.cell
 def _(mo):
     fmt_dropdown = mo.ui.dropdown(
-        options=["E1M6 (8b)", "E2M5 (8b)", "E4M3 (8b)", "E5M2 (8b)",
-                 "E2M3 (6b)", "E2M1 (4b)"],
-        value="E4M3 (8b)",
+        options=["E2M1 (4b)", "E2M3 (6b)", "E4M3 (8b)", "E2M5 (8b)",
+                 "E1M6 (8b)", "E5M2 (8b)"],
+        value="E2M1 (4b)",
         label="Format:",
     )
     fmt_dropdown
@@ -425,12 +423,22 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
     _ax2.axvline(_pv[-1], color="#43A047", lw=2, ls="--",
                  label=f"Max representable ({_pv[-1]:.1f})", alpha=0.8)
 
+    # Code density on twin axis (log scale shows the low-end structure)
+    _ax2r = _ax2.twinx()
+    _ax2r.loglog(_midpoints, _density_norm, color="#43A047", lw=1.5,
+                 alpha=0.6, label="Code density")
+    _ax2r.set_ylabel("Code density", fontsize=9, color="#43A047")
+    _ax2r.tick_params(axis="y", colors="#43A047")
+    _ax2r.spines["right"].set_color("#43A047")
+
     _ax2.set_xlabel("|x| (log scale)", fontsize=10)
     _ax2.set_ylabel("P(|X| > x)", fontsize=10)
-    _ax2.set_title("Survival plot (log scale) — heavy tails visible", fontsize=11)
-    _ax2.legend(fontsize=9)
+    _ax2.set_title("Survival plot + code density (log scale)", fontsize=11)
+    # Combined legend
+    _h1, _l1 = _ax2.get_legend_handles_labels()
+    _h2, _l2 = _ax2r.get_legend_handles_labels()
+    _ax2.legend(_h1 + _h2, _l1 + _l2, fontsize=8, loc="lower left")
     _ax2.spines["top"].set_visible(False)
-    _ax2.spines["right"].set_visible(False)
 
     _buf = _io.BytesIO()
     _fig.savefig(_buf, format="png", dpi=150)
@@ -478,7 +486,7 @@ def _(mo):
         network inference: take two numbers, multiply them, add the result
         to a running sum. Every layer of every model is millions of MACs.
 
-        At the gate level, an 8-bit MAC is:
+        At the gate level, an **E4M3** (fp8) MAC is:
         """
     )
 
@@ -593,19 +601,18 @@ def _(mo):
         32-bit multiply cost?" to "what does an 8-bit MAC cost, including
         everything around it?"
 
-        | Operation | Horowitz 2014 | H0 PE | | Notes |
-        | | 45nm, 0.9V | 5nm, 0.4V | | |
-        |---|---|---|---|---|
-        | 8-bit int add | 30 fJ | ~2 fJ | | FA-based, ×0.284 voltage, ~5× process |
-        | 8-bit int multiply | 200 fJ | 2.0 fJ | | 4×4 Dadda tree |
-        | 32-bit int add | 100 fJ | — | | not a useful operation for inference |
-        | 32-bit FP multiply | 3,700 fJ | — | | not a useful operation for inference |
-        | **FP8 E4M3 multiply** | — | **4.6 fJ** | | mult + field extract + exponent logic |
-        | **FP8 E4M3 MAC** | — | **12.8 fJ** | | full datapath including accumulator |
-        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | | 5nm SRAM, 32-bit word |
-        | 32-bit DRAM read | 640,000 fJ | 160,000 fJ | ⚠ | LPDDR/HBM, long sequential reads |
+        | Operation | Horowitz 2014 (45nm, 0.9V) | H0 PE (5nm, 0.4V) | Notes |
+        |---|---|---|---|
+        | 8-bit int add | 30 fJ | ~2 fJ | FA-based |
+        | 8-bit int multiply | 200 fJ | 2.0 fJ | 4×4 Dadda tree |
+        | 32-bit int add | 100 fJ | — | not useful for inference |
+        | 32-bit FP multiply | 3,700 fJ | — | not useful for inference |
+        | **E4M3 multiply** | — | **4.6 fJ** | mult + field extract + exp logic |
+        | **E4M3 MAC (full)** | — | **12.8 fJ** | full datapath incl. accumulator |
+        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | 5nm SRAM, 32-bit word |
+        | 32-bit DRAM read | 640,000 fJ | 160,000 fJ | LPDDR/HBM, sustained sequential ⚠ |
 
-        ⚠ DRAM energy is per-access for sustained sequential reads,
+        ⚠ DRAM energy is for sustained sequential reads (5 pJ/bit),
         not random access. HBM is broadly similar per bit moved.
 
         The story: Horowitz showed that **data movement dominates
@@ -645,16 +652,13 @@ def _(mo):
     import io as _io
 
     # System energy budget at 22nm, 0.4V
-    # Core MAC: ~64 fJ/MAC = ~32 fJ/OP
-    # CRAM fetch: estimated from h0 analysis
-    # NoC: network-on-chip delivery
-    # Other: clock, control, I/O amortized
+    # Core E4M3 MAC: ~64 fJ/MAC = ~32 fJ/OP
+    # System overhead: +20 fJ/OP placeholder for 8b (from h0-pe-4b estimates)
+    # — includes CRAM bitline, NoC wire, clock distribution, control
+    # Detailed breakdown TBD pending CRAM bitline capacitance modeling
     _budget = {
-        "MAC core": 32,
-        "CRAM fetch": 22,
-        "NoC (data movement)": 15,
-        "Clock + control": 8,
-        "I/O (amortized)": 5,
+        "E4M3 MAC core": 32,
+        "System overhead\n(CRAM + NoC + ctrl)": 20,
     }
     _total = sum(_budget.values())
 
@@ -663,7 +667,7 @@ def _(mo):
                                         gridspec_kw={"width_ratios": [1, 1.3]})
 
     # Left: pie chart
-    _colors = ["#1E88E5", "#E53935", "#FF9800", "#78909C", "#BDBDBD"]
+    _colors = ["#1E88E5", "#FF9800"]
     _wedges, _texts, _autotexts = _ax1.pie(
         _budget.values(), labels=_budget.keys(),
         autopct=lambda p: f"{p:.0f}%\n({p*_total/100:.0f} fJ)",
@@ -677,11 +681,10 @@ def _(mo):
 
     # Right: TOPS/W comparison
     _configs = [
-        ("MAC core\nonly", 32, "#1E88E5"),
-        ("+ fetch\n(CRAM)", 32 + 22, "#E53935"),
-        ("+ NoC", 32 + 22 + 15, "#FF9800"),
-        ("Full\nsystem", _total, "#455A64"),
-        ("4-bit\n(E2M1)", 14, "#43A047"),  # h0-pe-4b postscale
+        ("E4M3\ncore only", 32, "#1E88E5"),
+        ("E4M3\n+ system", _total, "#455A64"),
+        ("E2M1 (4b)\ncore only", 7.3, "#43A047"),     # h0-pe-4b postscale
+        ("E2M1 (4b)\n+ system", 7.3 + 10, "#2E7D32"),  # +10 fJ/OP for 4b overhead
     ]
     _tops_w = [1e15 / (c[1] * 1e-15) / 1e12 for c in _configs]
 
@@ -707,27 +710,25 @@ def _(mo):
     _plt.close(_fig)
     _buf.seek(0)
 
-    _compute_frac = _budget["MAC core"] / _total * 100
-    _move_frac = (_budget["CRAM fetch"] + _budget["NoC (data movement)"]) / _total * 100
+    _core_frac = _budget["E4M3 MAC core"] / _total * 100
 
     mo.vstack([
         mo.image(_buf.read(), width=900),
         mo.md(f"""
-        The MAC core is only **{_compute_frac:.0f}%** of system energy.
-        Data movement (CRAM fetch + NoC) is **{_move_frac:.0f}%**. This
-        is the fundamental challenge: **moving a byte costs more than
-        multiplying it**.
+        The E4M3 MAC core is **{_core_frac:.0f}%** of system energy;
+        the rest is data movement and control (CRAM bitline, NoC
+        wire energy, clock distribution). System overhead is a
+        placeholder (~20 fJ/OP for 8b) pending detailed CRAM modeling.
 
-        The rightmost bar shows what 4-bit inference buys: the multiplier
-        shrinks dramatically (2×2 instead of 4×4), and you fetch half the
-        bits. The Boqueria/Speed AI
+        4-bit (E2M1) buys efficiency at both levels: the multiplier
+        shrinks (2×2 vs 4×4 Dadda tree), and you fetch half the bits.
+        The Boqueria/Speed AI
         [MLPerf result](https://mlcommons.org/benchmarks/inference-datacenter/)
-        at ~20 TOPS/W is an existence proof that this level of efficiency
-        is achievable in real silicon.
+        at ~20 TOPS/W is an existence proof that purpose-built
+        inference silicon achieves this.
 
-        Note: all numbers here are for 22nm @ 0.4V (our process target).
-        At 5nm the core energy drops to ~13 fJ/MAC, but the system
-        overhead ratios stay similar.
+        All numbers are for 22nm @ 0.4V. At 5nm the core drops to
+        ~13 fJ/MAC (E4M3), but the overhead ratios stay similar.
         """),
     ])
 
