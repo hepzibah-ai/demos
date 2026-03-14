@@ -171,17 +171,17 @@ def _(word1_input, word2_input, build_format_values, quantize_vec,
                 _err = abs(_cos - _exact)
             _rows.append(f"| {_fname} | {_bits} | {_cos:.6f} | {_err:.6f} |")
 
-        _out = mo.md(f"""
-        **"{_word1}"** vs **"{_word2}"** — GloVe-50d, per-vector absmax scaling:
+        _table = "\n".join(_rows)
+        _out = mo.md(f"""**"{_word1}"** vs **"{_word2}"** — GloVe-50d, per-vector absmax scaling:
 
-        | Format | Bits | Cosine similarity | Error vs fp32 |
-        |--------|------|-------------------|---------------|
-        {chr(10).join(_rows)}
+| Format | Bits | Cosine similarity | Error vs fp32 |
+|--------|------|-------------------|---------------|
+{_table}
 
-        The 8-bit formats all agree to ~4 decimal places. Even 6-bit (E2M3)
-        is close. Only at 4-bit (E2M1) does the error become visible —
-        and it's still small.
-        """)
+The 8-bit formats all agree to ~4 decimal places. Even 6-bit (E2M3)
+is close. Only at 4-bit (E2M1) does the error become visible —
+and it's still small.
+""")
     _out
 
 
