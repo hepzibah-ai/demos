@@ -677,7 +677,7 @@ def _(mo):
     _core =     [32, 7.3]
     _overhead = [10, 5]
     _totals =   [c + o for c, o in zip(_core, _overhead)]
-    _tops_w =   [1e15 / (t * 1e-15) / 1e12 for t in _totals]
+    _tops_w =   [1e3 / t for t in _totals]  # 1W / (t fJ/OP) in TOPS/W
 
     _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(12, 5),
                                         constrained_layout=True)
