@@ -149,7 +149,7 @@ def _(word1_input, word2_input, build_format_values, quantize_vec,
 
     if _word1 not in glove_model or _word2 not in glove_model:
         _missing = [w for w in [_word1, _word2] if w not in glove_model]
-        mo.md(f"**Word not in vocabulary:** {', '.join(_missing)}")
+        _out = mo.md(f"**Word not in vocabulary:** {', '.join(_missing)}")
     else:
         _v1 = glove_model[_word1].astype(_np.float64)
         _v2 = glove_model[_word2].astype(_np.float64)
@@ -171,7 +171,7 @@ def _(word1_input, word2_input, build_format_values, quantize_vec,
                 _err = abs(_cos - _exact)
             _rows.append(f"| {_fname} | {_bits} | {_cos:.6f} | {_err:.6f} |")
 
-        mo.md(f"""
+        _out = mo.md(f"""
         **"{_word1}"** vs **"{_word2}"** — GloVe-50d, per-vector absmax scaling:
 
         | Format | Bits | Cosine similarity | Error vs fp32 |
@@ -182,6 +182,7 @@ def _(word1_input, word2_input, build_format_values, quantize_vec,
         is close. Only at 4-bit (E2M1) does the error become visible —
         and it's still small.
         """)
+    _out
 
 
 # ── §2  The ExMy family and scaling ──
@@ -423,11 +424,18 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
     _ax2.axvline(_pv[-1], color="#43A047", lw=2, ls="--",
                  label=f"Max representable ({_pv[-1]:.1f})", alpha=0.8)
 
-    # Code density on twin axis (log scale shows the low-end structure)
+    # Code density + data density on twin axis (log scale)
     _ax2r = _ax2.twinx()
     _ax2r.loglog(_midpoints, _density_norm, color="#43A047", lw=1.5,
                  alpha=0.6, label="Code density")
-    _ax2r.set_ylabel("Code density", fontsize=9, color="#43A047")
+    # Data density (KDE-like: histogram on log-spaced bins, normalized)
+    _log_bins = _np.logspace(_np.log10(max(_abs_scaled[_abs_scaled > 0].min(), 1e-4)),
+                              _np.log10(_abs_scaled.max() * 1.1), 80)
+    _data_hist, _data_edges = _np.histogram(_abs_scaled, bins=_log_bins, density=True)
+    _data_centers = (_data_edges[:-1] + _data_edges[1:]) / 2
+    _ax2r.loglog(_data_centers, _data_hist, color="#E53935", lw=1.5,
+                 alpha=0.5, ls="--", label="Data density")
+    _ax2r.set_ylabel("Density (log)", fontsize=9, color="#43A047")
     _ax2r.tick_params(axis="y", colors="#43A047")
     _ax2r.spines["right"].set_color("#43A047")
 
@@ -604,12 +612,12 @@ def _(mo):
         | Operation | Horowitz 2014 (45nm, 0.9V) | H0 PE (5nm, 0.4V) | Notes |
         |---|---|---|---|
         | 8-bit int add | 30 fJ | ~2 fJ | FA-based |
-        | 8-bit int multiply | 200 fJ | 2.0 fJ | 4×4 Dadda tree |
+        | 8-bit int multiply | 200 fJ | 2.0 fJ | E4M3 mantissa: 4×4 Dadda tree |
         | 32-bit int add | 100 fJ | — | not useful for inference |
         | 32-bit FP multiply | 3,700 fJ | — | not useful for inference |
         | **E4M3 multiply** | — | **4.6 fJ** | mult + field extract + exp logic |
         | **E4M3 MAC (full)** | — | **12.8 fJ** | full datapath incl. accumulator |
-        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | 5nm SRAM, 32-bit word |
+        | 32-bit SRAM read (8KB) | 5,000 fJ | ~20 fJ | 5nm, low-energy sense amp |
         | 32-bit DRAM read | 640,000 fJ | 160,000 fJ | LPDDR/HBM, sustained sequential ⚠ |
 
         ⚠ DRAM energy is for sustained sequential reads (5 pJ/bit),
@@ -619,8 +627,15 @@ def _(mo):
         compute**. That's still true — but the ratio has shifted. With
         8-bit MACs at 5 fJ and SRAM at 20 fJ, compute is now cheap
         enough that the entire design challenge is keeping the datapath
-        fed. Every architectural decision we make is about minimizing
-        data movement.
+        fed.
+
+        Traditionally, the multiplier was the energy bottleneck — its
+        gate count grows as the **square** of the bit-width (an N×N
+        multiplier needs ~N² AND gates). But that same quadratic
+        scaling works in your favour at low precision: a 4×4 multiplier
+        (E4M3 mantissa) has 16 AND gates; a 2×2 (E2M1) has 4. At these
+        sizes the multiplier is no longer the dominant cost — the
+        accumulator, shifter, and data movement are.
 
         *Source: M. Horowitz,
         ["Computing's Energy Problem (and what we can do about it),"](https://gwern.net/doc/cs/hardware/2014-horowitz-2.pdf)
@@ -652,83 +667,82 @@ def _(mo):
     import io as _io
 
     # System energy budget at 22nm, 0.4V
-    # Core E4M3 MAC: ~64 fJ/MAC = ~32 fJ/OP
-    # System overhead: +20 fJ/OP placeholder for 8b (from h0-pe-4b estimates)
-    # — includes CRAM bitline, NoC wire, clock distribution, control
-    # Detailed breakdown TBD pending CRAM bitline capacitance modeling
-    _budget = {
-        "E4M3 MAC core": 32,
-        "System overhead\n(CRAM + NoC + ctrl)": 20,
-    }
-    _total = sum(_budget.values())
+    # Source: h0-pe-8b/docs/area-power-estimate.md §4
+    # Core E4M3: 64 fJ/MAC = 32 fJ/OP
+    # System overhead (CRAM + NoC + clock + ctrl): +30 to +50 fJ/OP
+    #   (doesn't scale simply with process; depends on bitline length, wire distance)
+    # E2M1 core: 7.3 fJ/cycle (h0-pe-4b postscale), overhead placeholder +10 fJ/OP
+
+    # Stacked bar: core + overhead range for each format
+    _labels = ["E4M3 (8b)\noptimistic", "E4M3 (8b)\nmoderate",
+               "E4M3 (8b)\npessimistic", "E2M1 (4b)\n(placeholder)"]
+    _core =     [32, 32, 32, 7.3]
+    _overhead = [30, 40, 50, 10]
+    _totals =   [c + o for c, o in zip(_core, _overhead)]
+    _tops_w =   [1e15 / (t * 1e-15) / 1e12 for t in _totals]
 
     _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(12, 5),
-                                        constrained_layout=True,
-                                        gridspec_kw={"width_ratios": [1, 1.3]})
+                                        constrained_layout=True)
 
-    # Left: pie chart
-    _colors = ["#1E88E5", "#FF9800"]
-    _wedges, _texts, _autotexts = _ax1.pie(
-        _budget.values(), labels=_budget.keys(),
-        autopct=lambda p: f"{p:.0f}%\n({p*_total/100:.0f} fJ)",
-        colors=_colors, startangle=90,
-        textprops={"fontsize": 9},
-    )
-    for _t in _autotexts:
-        _t.set_fontsize(8)
-    _ax1.set_title(f"System energy budget\n{_total} fJ/OP @ 22nm, 0.4V",
-                   fontsize=11)
+    # Left: stacked bar — fJ/OP breakdown
+    _x = range(len(_labels))
+    _ax1.bar(_x, _core, color="#1E88E5", label="MAC core")
+    _ax1.bar(_x, _overhead, bottom=_core, color="#FF9800",
+             label="System overhead\n(CRAM + NoC + ctrl)")
+    _ax1.set_xticks(_x)
+    _ax1.set_xticklabels(_labels, fontsize=8)
+    _ax1.set_ylabel("fJ / OP")
+    _ax1.set_title("Energy per operation @ 22nm, 0.4V")
+    _ax1.legend(fontsize=8, loc="upper left")
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+    for _i in range(len(_labels)):
+        _ax1.text(_i, _totals[_i] + 1.5, f"{_totals[_i]:.0f}",
+                  ha="center", fontsize=9, fontweight="bold")
 
-    # Right: TOPS/W comparison
-    _configs = [
-        ("E4M3\ncore only", 32, "#1E88E5"),
-        ("E4M3\n+ system", _total, "#455A64"),
-        ("E2M1 (4b)\ncore only", 7.3, "#43A047"),     # h0-pe-4b postscale
-        ("E2M1 (4b)\n+ system", 7.3 + 10, "#2E7D32"),  # +10 fJ/OP for 4b overhead
-    ]
-    _tops_w = [1e15 / (c[1] * 1e-15) / 1e12 for c in _configs]
-
-    _bars = _ax2.bar(range(len(_configs)), _tops_w,
-                     color=[c[2] for c in _configs])
-    _ax2.set_xticks(range(len(_configs)))
-    _ax2.set_xticklabels([c[0] for c in _configs], fontsize=9)
-    _ax2.set_ylabel("TOPS/W")
-    _ax2.set_title("Efficiency at each level")
+    # Right: TOPS/W (derived)
+    _ax2.barh(range(len(_labels)), _tops_w,
+              color=["#1E88E5", "#455A64", "#78909C", "#43A047"])
+    _ax2.set_yticks(range(len(_labels)))
+    _ax2.set_yticklabels(_labels, fontsize=8)
+    _ax2.set_xlabel("TOPS/W (system)")
+    _ax2.set_title("Efficiency (higher is better)")
+    _ax2.invert_yaxis()
     _ax2.spines["top"].set_visible(False)
     _ax2.spines["right"].set_visible(False)
     for _i, _v in enumerate(_tops_w):
-        _ax2.text(_i, _v + 0.3, f"{_v:.1f}", ha="center", fontsize=9,
-                  fontweight="bold")
+        _ax2.text(_v + 0.3, _i, f"{_v:.1f}", va="center", fontsize=9)
 
     # Reference line: Boqueria/SpeedAI MLPerf
-    _ax2.axhline(20, color="#999", ls="--", lw=1.5, alpha=0.6)
-    _ax2.text(len(_configs) - 0.5, 20.5, "Boqueria MLPerf\n(~20 TOPS/W)",
-              fontsize=8, color="#666", ha="right")
+    _ax2.axvline(20, color="#999", ls="--", lw=1.5, alpha=0.6)
+    _ax2.text(20.5, len(_labels) - 0.5, "Boqueria\nMLPerf",
+              fontsize=8, color="#666", va="top")
 
     _buf = _io.BytesIO()
     _fig.savefig(_buf, format="png", dpi=150)
     _plt.close(_fig)
     _buf.seek(0)
 
-    _core_frac = _budget["E4M3 MAC core"] / _total * 100
-
     mo.vstack([
         mo.image(_buf.read(), width=900),
-        mo.md(f"""
-        The E4M3 MAC core is **{_core_frac:.0f}%** of system energy;
-        the rest is data movement and control (CRAM bitline, NoC
-        wire energy, clock distribution). System overhead is a
-        placeholder (~20 fJ/OP for 8b) pending detailed CRAM modeling.
+        mo.md("""
+        **Left**: energy per operation, split into MAC core (blue) and
+        system overhead (orange). The core is well-characterized from
+        cell-level analysis; the overhead (CRAM bitline, NoC wire energy,
+        clock distribution, control) is presented as a range — it
+        doesn't scale simply with process node because it depends on
+        physical distances, not transistor size.
 
-        4-bit (E2M1) buys efficiency at both levels: the multiplier
-        shrinks (2×2 vs 4×4 Dadda tree), and you fetch half the bits.
-        The Boqueria/Speed AI
+        **Right**: the resulting TOPS/W. The Boqueria/Speed AI
         [MLPerf result](https://mlcommons.org/benchmarks/inference-datacenter/)
-        at ~20 TOPS/W is an existence proof that purpose-built
-        inference silicon achieves this.
+        at ~20 TOPS/W lands in our moderate-to-pessimistic E4M3 range.
+        4-bit (E2M1) numbers are placeholders pending detailed modeling,
+        but the direction is clear: halving the bits shrinks both core
+        energy (quadratic in multiplier width) and overhead (half the
+        bits to move).
 
-        All numbers are for 22nm @ 0.4V. At 5nm the core drops to
-        ~13 fJ/MAC (E4M3), but the overhead ratios stay similar.
+        All numbers are for 22nm @ 0.4V. E2M1 overhead is a placeholder
+        (~10 fJ/OP) awaiting CRAM bitline capacitance modeling.
         """),
     ])
 
@@ -745,11 +759,17 @@ def _(mo):
         Three properties of inference make it uniquely suited to
         purpose-built hardware:
 
-        1. **The operation is uniform.** It's MACs all the way down.
-           Every layer, every token, every model. A GPU provides
-           thousands of operations you'll never use; an inference
-           accelerator provides one operation done as efficiently as
-           physics allows.
+        1. **The operation is (almost) uniform.** A transformer
+           layer is overwhelmingly MACs — but not *entirely*. There are
+           nonlinearities (SiLU, GELU), normalization (RMSNorm), and
+           softmax. A naive accelerator that only does matrix-vector
+           products hits **Amdahl's Law**: the 5% of runtime that isn't
+           GEMV becomes the bottleneck. The trick is that these
+           "non-MAC" operations can themselves be decomposed into MACs
+           — SiLU is a polynomial approximation, softmax is
+           exponentiation via multiply-and-shift, RMSNorm is a
+           reciprocal square root. Build the MAC well enough, and it
+           handles everything.
 
         2. **The precision is low.** We've seen that 8-bit — even 4-bit
            — preserves the geometry. Low precision means small
@@ -766,7 +786,7 @@ def _(mo):
         not because GPUs can't do inference, but because they waste
         energy on flexibility the workload doesn't need. The dot product
         — the same operation you explored in
-        [notebook 3](../dot-product) — is the only operation that
+        [notebook 3](../dot-product) — is the only primitive that
         matters, and it deserves hardware built around it.
 
         ---
