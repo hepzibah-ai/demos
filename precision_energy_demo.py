@@ -48,6 +48,31 @@ def _(mo):
         """
         ## §1 — Quantize the dot product
 
+        ### Anatomy of a low-precision float
+
+        Every format in the **ExMy** family packs a sign bit, E exponent
+        bits, and M mantissa bits into a small word:
+
+        ```
+        ┌───┬───────────┬─────────────┐
+        │ s │ e₃e₂e₁e₀  │ m₂ m₁ m₀    │   ← E4M3: 1+4+3 = 8 bits
+        └───┴───────────┴─────────────┘
+        value = (-1)^s  ×  1.m₂m₁m₀  ×  2^(e - bias)
+        ```
+
+        The leading **1.** before the mantissa is *implied* — you get an
+        extra bit of precision for free. **Subnormals** are the exception:
+        when the exponent field is all zeros, the implied bit becomes **0.**
+        instead of 1., which is the only way to represent **zero** (and
+        values near it). This creates an awkward side effect: both
+        `00000000` and `10000000` are valid zeros (+0 and −0) — two
+        bit patterns for the same value.
+
+        The tradeoff: more exponent bits → wider dynamic range (useful
+        when you don't know the data scale, e.g. training gradients).
+        More mantissa bits → finer resolution (useful when you *do*
+        know the scale, e.g. inference with calibrated weights).
+
         Pick two words below. We'll compute their cosine similarity at
         full precision, then quantize **both vectors** to each format
         before recomputing. The result barely moves — until 4-bit.
@@ -342,38 +367,70 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
     _scale = _pv[-1] / (3.5 * _sigma)
     _scaled_coords = _coords * _scale
     _abs_scaled = _np.abs(_scaled_coords)
+    _clipped = _np.mean(_abs_scaled > _pv[-1])
 
-    # Survival plot
-    _thresholds = _np.logspace(-3, _np.log10(max(_abs_scaled.max(), _pv[-1]) * 1.2), 400)
+    # ── Code density: 1/(gap between adjacent codes) ──
+    _gaps = _np.diff(_pv)
+    _midpoints = (_pv[:-1] + _pv[1:]) / 2
+    _density = 1.0 / _gaps  # codes per unit
+    # Normalize so area ≈ 1 (like a distribution)
+    _density_norm = _density / (_density * _gaps).sum()
+
+    # Data histogram for overlay (on same linear scale)
+    _hist_vals, _hist_edges = _np.histogram(_abs_scaled, bins=80, density=True)
+    _hist_centers = (_hist_edges[:-1] + _hist_edges[1:]) / 2
+
+    # ── Two-panel figure ──
+    _fig, (_ax1, _ax2) = _plt.subplots(2, 1, figsize=(10, 8),
+                                        constrained_layout=True,
+                                        gridspec_kw={"height_ratios": [1, 0.8]})
+
+    # Top: linear picket fence + code density + data distribution
+    # Picket fence
+    for _v in _pv[1:]:
+        _ax1.axvline(_v, color="#43A047", alpha=0.25, lw=0.5, ymin=0, ymax=0.15)
+    # Code density curve
+    _ax1.plot(_midpoints, _density_norm, color="#43A047", lw=2,
+              label="Code density (1/gap, normalized)")
+    # Data distribution
+    _ax1.fill_between(_hist_centers, _hist_vals, alpha=0.15, color="#E53935")
+    _ax1.plot(_hist_centers, _hist_vals, color="#E53935", lw=1.5,
+              label="|GloVe coordinates| (scaled)", alpha=0.8)
+    # Clipping boundary
+    _ax1.axvline(_pv[-1], color="#43A047", lw=2, ls="--", alpha=0.7)
+
+    _ax1.set_xlabel("|x|", fontsize=10)
+    _ax1.set_ylabel("Density", fontsize=10)
+    _ax1.set_title(f"{fmt_dropdown.value} — code density vs data distribution "
+                   f"(linear scale)", fontsize=11)
+    _ax1.legend(fontsize=9)
+    _ax1.set_xlim(0, _pv[-1] * 1.15)
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+
+    # Bottom: log-scale survival plot (same as before)
+    _thresholds = _np.logspace(-3, _np.log10(max(_abs_scaled.max(),
+                               _pv[-1]) * 1.2), 400)
     _surv = _np.array([_np.mean(_abs_scaled > t) for t in _thresholds])
-
-    # Gaussian comparison
     _gauss = _np.abs(_np.random.default_rng(0).normal(0, _abs_scaled.std(),
-                                                        size=len(_abs_scaled)))
+                                                       size=len(_abs_scaled)))
     _surv_gauss = _np.array([_np.mean(_gauss > t) for t in _thresholds])
 
-    _fig, _ax = _plt.subplots(figsize=(10, 5), constrained_layout=True)
+    _ax2.loglog(_thresholds, _surv_gauss, color="#1E88E5", lw=2,
+                alpha=0.6, label="Matched Gaussian")
+    _ax2.loglog(_thresholds, _surv, color="#E53935", lw=2,
+                label="GloVe (scaled)")
+    for _v in _pv[1:]:
+        _ax2.axvline(_v, color="#43A047", alpha=0.15, lw=0.5)
+    _ax2.axvline(_pv[-1], color="#43A047", lw=2, ls="--",
+                 label=f"Max representable ({_pv[-1]:.1f})", alpha=0.8)
 
-    _ax.loglog(_thresholds, _surv_gauss, color="#1E88E5", lw=2,
-               alpha=0.6, label="Matched Gaussian")
-    _ax.loglog(_thresholds, _surv, color="#E53935", lw=2,
-               label="GloVe (scaled)")
-
-    # Rug plot of representable values
-    for _v in _pv[1:]:  # skip zero
-        _ax.axvline(_v, color="#43A047", alpha=0.15, lw=0.5)
-    # Mark clipping boundary
-    _ax.axvline(_pv[-1], color="#43A047", lw=2, ls="--",
-                label=f"Max representable ({_pv[-1]:.1f})", alpha=0.8)
-
-    _clipped = _np.mean(_abs_scaled > _pv[-1])
-    _ax.set_xlabel("|x| (scaled)", fontsize=10)
-    _ax.set_ylabel("P(|X| > x)", fontsize=10)
-    _ax.set_title(f"{fmt_dropdown.value} — {2**_bits} codepoints, "
-                  f"{_clipped:.2%} clipped at 3.5σ scaling", fontsize=11)
-    _ax.legend(fontsize=9)
-    _ax.spines["top"].set_visible(False)
-    _ax.spines["right"].set_visible(False)
+    _ax2.set_xlabel("|x| (log scale)", fontsize=10)
+    _ax2.set_ylabel("P(|X| > x)", fontsize=10)
+    _ax2.set_title("Survival plot (log scale) — heavy tails visible", fontsize=11)
+    _ax2.legend(fontsize=9)
+    _ax2.spines["top"].set_visible(False)
+    _ax2.spines["right"].set_visible(False)
 
     _buf = _io.BytesIO()
     _fig.savefig(_buf, format="png", dpi=150)
@@ -388,16 +445,22 @@ def _(fmt_dropdown, build_format_values, glove_model, mo):
     mo.vstack([
         mo.image(_buf.read(), width=900),
         mo.md(f"""
-        The green lines are the {_codes_total} positive representable values.
-        **{_codes_used}** of them fall within the data range.
-        {"Float formats concentrate codes near zero — dense where the data is densest." if _eb >= 2 else "With just 1 exponent bit, this format is nearly uniform — like a symmetric integer."}
+        **Top (linear)**: the green picket fence shows every representable
+        positive value; the green curve is **code density** — 1/(gap
+        between adjacent codes), normalized like a distribution. For
+        float formats with ≥2 exponent bits, code density peaks near
+        zero and falls off — it *looks like* a data distribution, which
+        is why floats match Gaussian-ish data naturally.
+        {"With just 1 exponent bit, the density is nearly flat — essentially a symmetric integer." if _eb < 2 else ""}
 
-        The red curve sits above the blue (Gaussian) in the tails — that's
-        the Zipf-law heavy tails from notebook 4. Values beyond the dashed
-        line ({_clipped:.2%} of data) get clipped.
+        **Bottom (log)**: the survival plot from notebook 4. The red
+        curve sits above the blue (Gaussian) in the tails — Zipf-law
+        heavy tails. Values beyond the dashed line ({_clipped:.2%} of
+        data at 3.5σ scaling) get clipped.
 
-        Try switching formats to see how the code density and clipping
-        boundary change.
+        The {_codes_total} positive codes span {_pv[1]:.4f} to
+        {_pv[-1]:.1f}; **{_codes_used}** fall within the data range.
+        Try switching formats to see how the code density shape changes.
         """),
     ])
 
