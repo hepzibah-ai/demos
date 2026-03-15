@@ -22,8 +22,8 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 1 | `tokenizer_demo.py` | What's a Token? | `/tokenizer` | Deployed |
 | 2 | `embedding_demo.py` | What's an Embedding? | `/embedding` | Deployed |
 | 3 | `dot_product_demo.py` | The Dot Product | `/dot-product` | Deployed (beta) |
-| 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) ✓ |
-| 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (alpha) |
+| 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) |
+| 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (beta) — shipped to Takis |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | — | PCA | — | Planned |
 | 7 | — | Clustering | — | Planned |
@@ -34,125 +34,44 @@ Wiki companion pages: [How LLMs See Words](https://github.com/hepzibah-ai/genera
 
 ---
 
-## Notebook 4: "High Dimensions"
+## Notebook 4: "High Dimensions" — shipped (beta)
 
-Next to build. The story in three acts:
-- **Act I** (§1–2): Where we came from — one-hot codes, the curse
-- **Act II** (§3–5): The geometry — what high-D space is actually like
-- **Act III** (§6–8): Structure — how training exploits the geometry,
-  and why sparsity is a fundamental property (not a hardware trick)
-
-No hardware discussion here — just build the understanding. Later
-notebooks (precision/energy, microscaling) and sim0 analyses (seven
-dwarfs) harvest these ideas.
-
-### Sections:
-1. **One-hot: where we came from**: before embeddings, every word was a
-   one-hot vector — vocabulary of 50K words → 50K-dim vector with a
-   single 1. Maximally sparse, zero structure. Every word is equidistant
-   from every other (all pairwise distances = √2). This is the baseline
-   the rest of the notebook improves on.
-2. **The curse of dimensionality**: Bellman's original insight — volume
-   grows exponentially with dimension, so uniform sampling becomes
-   hopeless. The one-hot representation is the curse in its purest form:
-   50K dimensions, all information in 1 of them. Show: fraction of
-   hypercube volume within ε of the surface vs D (same calculation as
-   sphere shell, but starting from the cube makes the "curse" framing
-   concrete). Reference: Bellman 1961; Hamming ch.9 for the accessible
-   version.
-3. **Random vectors are nearly orthogonal**: 1000 random unit vectors in
-   D dims, histogram of pairwise cosines. Slider for dimension — watch
-   histogram sharpen around zero. Compare random vs GloVe side by side.
-   Key insight: in high-D, "most directions are roughly perpendicular
-   to most other directions." This is concentration of measure.
-4. **Everything lives on the shell**: fraction of sphere volume within ε
-   of surface vs D. By D=50 it's ~1.0. Coordinates of a random unit
-   vector ≈ N(0, 1/√D) — show histogram. This is why norms concentrate.
-5. **Heavy tails — what's NOT Gaussian**: pool all GloVe coordinates,
-   show they're heavier-tailed than the matched Gaussian. Two distinct
-   mechanisms:
-   - **GloVe**: tails from language statistics (Zipf's law — a few words
-     dominate co-occurrence). No regularization; the tails are structural.
-     Reference: Pennington et al. 2014; Wikipedia "Zipf's law"; Powers
-     1998.
-   - **Transformer activations**: more extreme outliers emerging at scale
-     (~6.7B+ params). Reference: Dettmers et al. 2022 "LLM.int8()";
-     Anthropic "Toy Models of Superposition" 2022.
-   - **Visualization**: log-log survival plot (complementary CDF). GloVe
-     coordinates vs matched Gaussian on log-log axes. Gaussian drops like
-     a cliff; GloVe sits above in the tails. The log abscissa has physical
-     meaning (floating-point codes are log-spaced). Draw clipping
-     boundaries for fp8/int8 — foreshadows notebook 5.
-   - Frame honestly: "GloVe shows mild heavy tails from Zipf; transformer
-     activations show extreme outliers from a different mechanism."
-6. **The curse becomes a blessing — linear representations**: trained
-   embeddings have structure where random vectors don't. The network
-   learns to encode concepts as *directions*. King − man + woman = queen
-   because gender is a direction. The high-D space that cursed one-hot
-   codes is exactly what makes this possible: there's room for thousands
-   of near-orthogonal meaningful directions in 50 dimensions.
-   References: Mikolov 2013, Elhage et al. "Toy Models of Superposition".
-7. **Superposition and sparsity**: more concepts than dimensions, packed
-   via near-orthogonal directions. Callback to embedding demo's
-   orthogonality section. Key insight: if representations are
-   superposed, activations are naturally *sparse* — most features are
-   off for any given input. This isn't an accident or a compression
-   trick; it's a fundamental consequence of how high-D representations
-   work. (Don't connect to hardware here — just establish sparsity as a
-   property of the representations themselves.)
-8. **Nearest-neighbor collapse**: for random data, farthest/nearest
-   distance ratio → 1 as D grows (the curse). But NOT for trained
-   embeddings — show both. This is why embeddings are useful despite
-   high dimensionality: the learned structure defeats the curse.
-7. **References**: Hamming ch.9, 3Blue1Brown higher-dimensions video,
-   Elhage et al., Dettmers et al., Pennington et al. 2014, Powers 1998 /
-   Wikipedia (Zipf's law).
+8 sections: one-hot baseline → curse of dimensionality → concentration
+of measure (random orthogonality, shell concentration) → heavy tails
+(log-log survival, Zipf vs transformer outliers) → linear representations
+→ superposition/sparsity → nearest-neighbor collapse → packing bounds
+with quantization noise lines (E1M6–E2M1, numerical Monte Carlo, zoom
+slider). Matplotlib sizing fix: manual PNG render to avoid bbox_inches
+cropping.
 
 ---
 
-## Notebook 5: "Precision and Energy"
+## Notebook 5: "Precision and Energy" — shipped (beta)
 
-Story arc: you've seen that low precision preserves geometry (notebook 4).
-Now: *why* low precision, *how* number formats work, and *what it costs*
-in energy. Develop the clearest story first; redact IP later if needed.
+6 sections as built:
+1. **Format anatomy + quantize the dot product**: sign/exponent/mantissa
+   explanation, subnormals, ±0. Interactive word-pair cosine table across
+   fp32/E5M2/E4M3/E2M5/E1M6/E2M3/E2M1.
+2. **ExMy family + scaling**: RMS error vs scale factor (2σ–5.5σ) for 6
+   formats. Bar chart at current scale. E2M5 beats E4M3 ~3.5× at optimal;
+   E5M2 for training, E2M5 for inference.
+3. **Distribution meets format**: linear picket fence + peak-normalized
+   code density vs data distribution shape comparison. Log survival plot
+   with code density and data density on twin axis. Dropdown to switch
+   formats.
+4. **MAC energy breakdown (E4M3)**: 10-component bar from h0-pe-8b
+   (45 fJ/MAC @ 5nm/0.75V). Voltage scaling (0.4V: ×0.28) and process
+   scaling (22nm: ×5). Horowitz 2014 comparison table with H0 5nm/0.4V
+   numbers. Multiplier quadratic commentary.
+5. **System energy budget**: stacked bar (core + ~10 fJ/OP overhead,
+   conservative). E4M3: 42 fJ/OP → 24 TOPS/W. E2M1: 12 fJ/OP →
+   81 TOPS/W. Boqueria MLPerf reference at ~20 TOPS/W.
+6. **Why custom silicon**: Amdahl's Law framing — "almost uniform" because
+   SiLU/softmax/RMSNorm decompose into MACs. Low precision, enormous
+   volume.
 
-### Sections:
-1. **Quantize the dot product**: fp32, fp16, E4M3, E2M5, INT8, E2M1
-   side by side on same GloVe word pair. Interactive: pick two words,
-   see cosine at each precision. The "barely moves" moment.
-2. **The ExMy family and scaling**: all formats are one family — trade
-   exponent bits for mantissa bits within a fixed budget. Present the
-   full landscape: E1M6 (≈symmetric INT8), E2M5 (inference sweet spot),
-   E4M3 (OCP standard), E5M2 (training — gradient dynamic range),
-   E2M3 (6b), E2M1 (4b/MXFP4). Interactive sweep of scale factor
-   (2σ–5σ + peak) vs RMS error for Gaussian data — shows that optimal
-   scaling depends on both format and data distribution. E2M5 beats E4M3
-   by ~3.5× at optimal scaling; E2M3 is worse than E4M3 despite same
-   mantissa (subnormal degradation from narrow exponent). Starter code
-   in `scratch/quant_noise_test.py`.
-3. **Distribution meets number format**: bring back the log-log survival
-   plot from notebook 4. Overlay representable values for each format
-   as tick marks or code-density rug plot. fp codes are log-spaced →
-   dense where the data is dense. INT8 codes are uniform → wastes codes
-   in the empty middle. Draw clipping boundaries. Interactive: dropdown
-   to switch format and watch the clipping line move.
-4. **What does a MAC cost?**: gate-level anatomy of a multiply-accumulate.
-   Dadda tree (AND gates → half/full adders → accumulator). Count the
-   gates, show energy per toggle from 5nm cell data (~0.3–1.4 fJ).
-   Component breakdown: multiplier ~7 fJ, shifter ~4 fJ, accumulator
-   ~11 fJ, latches/control ~14 fJ → total ~45 fJ/MAC @0.75V 5nm.
-   Voltage scaling to 0.4V → ~13 fJ/MAC. Process scaling 22nm → ~64 fJ.
-   Source: h0-pe-8b/docs/area-power-estimate.md.
-5. **The energy budget — where do the joules go?**: pie chart of compute
-   vs data movement vs overhead. Fetch dominates: "moving a byte costs
-   more than multiplying it." CRAM + NoC overhead is +30–50 fJ/OP on
-   top of ~32 fJ/OP core. System total: 62–82 fJ/OP → 12–16 TOPS/W.
-   Compare: 4-bit (h0-pe-4b) gets ~7 fJ/cycle → ~63 TOPS/W.
-   Reference Boqueria/Speed AI MLPerf as existence proof.
-6. **Why custom silicon**: the operation is uniform (MAC), precision is
-   low (4–8 bits), volume is enormous. GPUs waste energy on flexibility
-   the workload doesn't need. This is why purpose-built inference
-   silicon can be 10–50× more efficient per watt.
+Key numbers: SRAM read 2 fJ/bit (64 fJ/32b), DRAM 5 pJ/bit (sustained).
+Starter code for scaling analysis in `scratch/quant_noise_test.py`.
 
 ---
 
