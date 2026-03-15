@@ -23,6 +23,7 @@ RUN python -c "import gensim.downloader as api; \
 # Copy notebooks, data, and server
 COPY *.py /app/notebooks/
 COPY data/ /app/notebooks/data/
+COPY figures/ /app/notebooks/figures/
 COPY deploy/server.py /app/deploy/server.py
 
 EXPOSE 8081
