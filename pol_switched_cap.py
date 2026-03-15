@@ -31,19 +31,19 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Switched-Capacitor Series-String Power Supply
+    # Switched-Capacitor Mid-Point Balancer
 
-    ## The idea
+    ## The series-string idea
 
     Processing elements (PEs) operate at 0.3–0.5 V and draw ~1 A each.
     Instead of giving each PE its own voltage regulator, we **stack PEs in
     series** so the same current flows through all of them:
 
     ```
-        Vin (battery)
+        Vin (battery, 0.9–1.6 V)
          │
         ┌┴┐
-        │ │  String supply — regulates total string voltage
+        │ │  String supply (buck converter — see separate notebook)
         └┬┘
          ├─── Vstring = N × Vpe
          │
@@ -63,8 +63,27 @@ def _(mo):
     work — current simply flows through. The balancer only handles the
     **mismatch** (±10% of load current), so it is small and low-power.
 
-    This notebook explores the **switched-capacitor** approach for both the
-    string supply and the balancer.
+    ## Efficiency targets
+
+    Our overall target is **90% wall-to-battery efficiency**. Not all
+    watts are equal — the string supply carries the full load current,
+    while the balancer only handles the mismatch:
+
+    | Block | Current | Efficiency target | Why |
+    |-------|---------|-------------------|-----|
+    | String supply | 100% of load | **95%** | Carries all the power; every % counts |
+    | Balancer | ≤10% of load (worst case) | **50%** | Only 10% of current → 50% × 10% = 5% system loss |
+    | **System** | | **~90%** | 95% × (1 − 0.05) ≈ 90% |
+
+    The 95% string-supply target over a wide input range (0.9–1.6 V)
+    strongly favors an **inductive buck converter** — a switched-capacitor
+    converter can only produce fixed rational fractions of Vin, and the
+    ratio loss at unfavorable voltages is too high. The string supply is
+    covered in a [separate notebook](./pol_inductive.py).
+
+    **This notebook focuses on the switched-capacitor balancer**, where
+    the relaxed efficiency target (50%) and small current make SC a
+    natural fit: simple, no magnetics, small die area.
     """)
     return
 
@@ -72,30 +91,33 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Gear shifting
+    ## Balancer topology
 
-    A switched-capacitor converter produces an output that is a **fixed
-    rational fraction** of the input. With one flying capacitor you get
-    two gears:
+    The balancer uses a **flying-capacitor** charge pump to shuttle charge
+    between the two string segments. Two operating modes:
 
-    | Gear | Vout/Vin | Switches | Flying cap |
-    |------|----------|----------|------------|
-    | 1:1 (bypass) | 1 | 2 | none |
-    | 2:1 (step-down) | 1/2 | 4 | 1 |
+    ### Normal mode (Vmid too low — bottom PE draws more)
 
-    When a gear's ideal output exceeds the target, the excess drops across
-    switch resistance. The resulting **ratio efficiency** is:
+    A 1:1 connection from the battery (or string supply output) into the
+    bottom segment, delivering extra current to make up the shortfall.
+    The battery voltage is always above Vpe, so no step-up is needed —
+    the excess drops across switch resistance.
 
-    $$\eta_{ratio} = \frac{V_{target}}{k \cdot V_{in}}$$
+    - Phase 1: Cfly charges from Vin (through 2 switches)
+    - Phase 2: Cfly discharges into bottom segment (through 2 switches)
 
-    where $k$ is the gear ratio (1 or 1/2). You want the gear whose ideal
-    output is **closest to, but above**, the target.
+    This is the simplest SC topology — just a pair of half-bridge switches
+    acting as a 1:1 converter, sized for the mismatch current only.
 
-    As the battery discharges from 1.6 V to 0.9 V, the optimal gear shifts:
+    ### Pump mode (Vmid too high — top PE draws more)
 
-    - **Full charge** (1.6 V): 2:1 → ideal 0.80 V ≈ target → near-perfect
-    - **Mid-life** (1.2 V): both gears overshoot — pick the closer one
-    - **End of life** (0.9 V): 1:1 → 0.9 V, regulate down (89% ratio eff.)
+    Moves charge from bottom segment to top segment:
+    - Phase 1: Cfly charges across bottom segment (Vmid → GND)
+    - Phase 2: Cfly dumps into top segment (Vstring → Vmid)
+
+    The top segment briefly sees a voltage bump, but the string supply
+    has the bandwidth to compensate. Net effect: charge moves bottom → top,
+    Vmid drops back toward target.
 
     All switches are **NMOS** (the partner's process). High-side switches
     need a bootstrap or charge-pump gate drive.
@@ -106,12 +128,12 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 2:1 Flying Capacitor Converter
+    ### Reference: Flying Capacitor Converter
 
     The diagram shows both phases of a basic divide-by-2 flying capacitor
-    converter. C1 is the flying cap; C2 and C3 are output and input filter
-    caps (off-chip). Four switches (SW1–SW4) reconfigure C1 between series
-    (charging) and parallel (discharging) with C2.
+    converter. The balancer reuses this switch fabric — the same 4 switches
+    can be reconfigured for normal mode (1:1 from battery) or pump mode
+    (bottom → top charge shuttle).
     """)
     return
 
@@ -124,25 +146,15 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    mo.md("""
-    ## Parameters
-    """)
+    mo.md("## Parameters")
     return
 
 
 @app.cell
 def _(mo):
-    ui_vin_max = mo.ui.slider(
-        start=1.0, stop=3.0, step=0.1, value=1.6,
-        label="Vin max — full charge (V)",
-    )
-    ui_vin_min = mo.ui.slider(
-        start=0.5, stop=2.0, step=0.1, value=0.9,
-        label="Vin min — end of life (V)",
-    )
-    ui_n_stages = mo.ui.slider(
-        start=2, stop=8, step=1, value=2,
-        label="String length (series PEs)",
+    ui_vin = mo.ui.slider(
+        start=0.5, stop=3.0, step=0.1, value=1.2,
+        label="Battery voltage (V)",
     )
     ui_vpe = mo.ui.slider(
         start=0.3, stop=0.5, step=0.01, value=0.4,
@@ -158,11 +170,10 @@ def _(mo):
     )
     mo.vstack([
         mo.md("### Application"),
-        mo.hstack([ui_vin_max, ui_vin_min], justify="start"),
-        mo.hstack([ui_n_stages, ui_vpe], justify="start"),
+        mo.hstack([ui_vin, ui_vpe], justify="start"),
         mo.hstack([ui_iload, ui_mismatch], justify="start"),
     ])
-    return ui_iload, ui_mismatch, ui_n_stages, ui_vin_max, ui_vin_min, ui_vpe
+    return ui_iload, ui_mismatch, ui_vin, ui_vpe
 
 
 @app.cell
@@ -187,26 +198,16 @@ def _(mo):
         start=1, stop=100, step=1, value=10,
         label="Flying capacitor (nF)",
     )
-    ui_sw_area = mo.ui.slider(
-        start=0.01, stop=1.0, step=0.01, value=0.1,
-        label="Total switch die area (mm²)",
-    )
-    ui_eta_target = mo.ui.slider(
-        start=70, stop=99, step=1, value=85,
-        label="Efficiency target (%)",
-    )
-    ui_lr_target = mo.ui.slider(
-        start=1, stop=15, step=1, value=5,
-        label="Load regulation target (%)",
+    ui_bal_area = mo.ui.slider(
+        start=0.001, stop=0.1, step=0.001, value=0.01,
+        label="Balancer total switch area (mm²)",
     )
     mo.vstack([
-        mo.md("### Converter Design"),
+        mo.md("### Balancer Design"),
         mo.hstack([ui_fsw, ui_cfly], justify="start"),
-        ui_sw_area,
-        mo.md("### Pass/Fail Targets"),
-        mo.hstack([ui_eta_target, ui_lr_target], justify="start"),
+        ui_bal_area,
     ])
-    return ui_cfly, ui_eta_target, ui_fsw, ui_lr_target, ui_sw_area
+    return ui_bal_area, ui_cfly, ui_fsw
 
 
 @app.cell
@@ -216,399 +217,241 @@ def _(dev_ui, device_from_sliders, device_summary_md, mo):
     return (dev,)
 
 
+# ===================================================================
+# Balancer analysis
+# ===================================================================
 @app.cell
 def _(gate_drive_loss, np):
-    # Gear definitions: (name, ratio k where Vout_ideal = k * Vin,
-    #                     n_switches, uses_flying_cap)
-    GEARS = [
-        ("1:1", 1.0, 2, False),
-        ("2:1", 0.5, 4, True),
-    ]
 
-    def sc_analysis(dev, Vin, Vstring, Iload, fsw, Cfly, A_sw):
-        """Analyze all gears at a single Vin. Returns dict of gear results."""
+    def balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, A_bal):
+        """Analyze both balancer modes.
+
+        Normal mode: 1:1 from battery into bottom segment.
+          - 2 switches in series, carrying Imis
+          - Vin drops to Vpe across switches (ratio eff = Vpe/Vin)
+
+        Pump mode: bottom → top charge shuttle.
+          - Phase 1: Cfly charges across bottom segment (Vpe)
+          - Phase 2: Cfly dumps into top segment
+          - 4 switches total, 2 in path at a time
+          - ΔV perturbation on top segment = Imis / (Cfly × fsw)
+        """
         results = {}
-        Pload = Vstring * Iload
 
-        for name, k, n_sw, uses_cap in GEARS:
-            Vout_ideal = k * Vin
-            if Vout_ideal < Vstring:
-                continue  # can't reach target in this gear
+        # --- Normal mode (1:1, battery to bottom segment) ---
+        _n_sw_normal = 2
+        _A_per_sw = A_bal / _n_sw_normal
+        _Ron_sw = dev.Ron_sp / _A_per_sw if _A_per_sw > 0 else float('inf')
+        _R_out = _n_sw_normal * _Ron_sw
 
-            eta_ratio = Vstring / Vout_ideal
+        _eta_ratio = Vpe / Vin if Vin > 0 else 0
+        _P_cond = Imis**2 * _R_out
+        _P_gate = gate_drive_loss(dev, A_bal, fsw)
+        _Pload = Vpe * Imis
+        _eta = _Pload / (_Pload + _P_cond + _P_gate) * _eta_ratio if _Pload > 0 else 0
 
-            # Switch Ron: divide total switch area equally among switches
-            A_per_sw = A_sw / n_sw
-            Ron_sw = dev.Ron_sp / A_per_sw
+        results["normal"] = {
+            "description": "1:1 battery → bottom",
+            "n_sw": _n_sw_normal,
+            "Ron_sw": _Ron_sw,
+            "R_out": _R_out,
+            "eta_ratio": _eta_ratio,
+            "P_cond": _P_cond,
+            "P_gate": _P_gate,
+            "eta_total": _eta,
+            "Vdrop_sw": Imis * _R_out,
+        }
 
-            # Output impedance
-            if uses_cap:
-                R_SSL = 1.0 / (Cfly * fsw)
-                R_FSL = n_sw * Ron_sw / 2   # half conduct at once
-                R_out = np.sqrt(R_SSL**2 + R_FSL**2)
-            else:
-                # Bypass: 2 series switches
-                R_out = n_sw * Ron_sw
+        # --- Pump mode (bottom → top charge shuttle) ---
+        _n_sw_pump = 4
+        _A_per_sw_pump = A_bal / _n_sw_pump
+        _Ron_sw_pump = dev.Ron_sp / _A_per_sw_pump if _A_per_sw_pump > 0 else float('inf')
+        _R_path = 2 * _Ron_sw_pump  # 2 switches in path at a time
 
-            P_cond = Iload**2 * R_out
-            P_gate = gate_drive_loss(dev, A_sw, fsw)
-            eta_total = Pload / (Pload + P_cond + P_gate) * eta_ratio
+        # Charge transfer: Q = Cfly × Vpe per cycle (Cfly charges to Vpe)
+        # Max current: Imis_max = Cfly × Vpe × fsw (if Cfly fully charges)
+        # But limited by Ron: effective ΔV = Vpe - Imis × R_path
+        _Q_per_cycle = Cfly * Vpe  # ideal
+        _I_max_pump = _Q_per_cycle * fsw  # max deliverable current
+        _delta_v = Imis / (Cfly * fsw) if Cfly * fsw > 0 else float('inf')
 
-            results[name] = {
-                "k": k,
-                "Vout_ideal": Vout_ideal,
-                "eta_ratio": eta_ratio,
-                "n_sw": n_sw,
-                "Ron_sw": Ron_sw,
-                "R_out": R_out,
-                "P_cond": P_cond,
-                "P_gate": P_gate,
-                "eta_total": eta_total,
-                "load_reg": Iload * R_out / Vstring,
-            }
+        _P_cond_pump = Imis**2 * _R_path
+        _P_gate_pump = gate_drive_loss(dev, A_bal, fsw)
+        # Pump mode: moving charge within the string, no ratio loss
+        # (energy comes from the mismatch, not from a higher voltage)
+        _eta_pump = _Pload / (_Pload + _P_cond_pump + _P_gate_pump) if _Pload > 0 else 0
+
+        results["pump"] = {
+            "description": "bottom → top shuttle",
+            "n_sw": _n_sw_pump,
+            "Ron_sw": _Ron_sw_pump,
+            "R_out": _R_path,
+            "eta_ratio": 1.0,  # no ratio loss in pump mode
+            "P_cond": _P_cond_pump,
+            "P_gate": _P_gate_pump,
+            "eta_total": _eta_pump,
+            "Vdrop_sw": Imis * _R_path,
+            "delta_v": _delta_v,
+            "I_max_pump": _I_max_pump,
+        }
 
         return results
 
-    return GEARS, sc_analysis
+    return (balancer_analysis,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Gear Map
+    ## Balancer Analysis
 
-    Efficiency vs. input voltage for each gear. The **bold envelope** is the
-    best gear at each voltage. Dashed line = efficiency target.
-
-    Efficiency includes **ratio loss** (inherent to the gear) and **resistive
-    loss** (switch Ron, capacitor charge-sharing). Gate drive loss is added
-    on top.
+    Both operating modes analyzed at the current slider settings.
+    The balancer only carries the **mismatch current** — a fraction
+    of the full PE load current.
     """)
     return
 
 
 @app.cell
 def _(
-    GEARS,
-    dev,
-    np,
-    plt,
-    sc_analysis,
-    ui_cfly,
-    ui_eta_target,
-    ui_fsw,
-    ui_iload,
-    ui_n_stages,
-    ui_sw_area,
-    ui_vin_max,
-    ui_vin_min,
-    ui_vpe,
+    balancer_analysis, dev, mo,
+    ui_bal_area, ui_cfly, ui_fsw,
+    ui_iload, ui_mismatch, ui_vin, ui_vpe,
 ):
-    Vstring = ui_n_stages.value * ui_vpe.value
-    Iload = ui_iload.value
+    Vin = ui_vin.value
+    Vpe = ui_vpe.value
+    Imis = ui_iload.value * (ui_mismatch.value / 100)
     fsw = ui_fsw.value * 1e6
     Cfly = ui_cfly.value * 1e-9
-    A_sw = ui_sw_area.value * 1e-6  # m²
+    A_bal = ui_bal_area.value * 1e-6  # mm² → m²
+    Pload_total = Vpe * ui_iload.value * 2  # both PEs
 
-    _vmin = max(ui_vin_min.value, Vstring + 0.01)
-    _vmax = ui_vin_max.value
-    if _vmin >= _vmax:
-        _vmax = _vmin + 0.1
-    Vin_sweep = np.linspace(_vmin, _vmax, 200)
+    bal = balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, A_bal)
+    _n = bal["normal"]
+    _p = bal["pump"]
 
-    # Per-gear efficiency arrays
-    gear_etas = {name: np.full_like(Vin_sweep, np.nan) for name, *_ in GEARS}
-    eta_best = np.zeros_like(Vin_sweep)
+    mo.md(f"""
+    ### Operating Point
 
-    for i, Vin in enumerate(Vin_sweep):
-        res = sc_analysis(dev, Vin, Vstring, Iload, fsw, Cfly, A_sw)
-        for name in res:
-            gear_etas[name][i] = res[name]["eta_total"] * 100
-        if res:
-            best = max(res, key=lambda g: res[g]["eta_total"])
-            eta_best[i] = res[best]["eta_total"] * 100
+    | | Normal mode | Pump mode |
+    |---|---|---|
+    | **When** | Vmid too low | Vmid too high |
+    | **Action** | Battery → bottom | Bottom → top |
+    | Mismatch current | ±{Imis*1e3:.0f} mA | ±{Imis*1e3:.0f} mA |
+    | Switches in path | {_n['n_sw']} | {_p['n_sw']} (2 active) |
+    | Ron per switch | {_n['Ron_sw']*1e3:.1f} mΩ | {_p['Ron_sw']*1e3:.1f} mΩ |
+    | Switch Vdrop | {_n['Vdrop_sw']*1e3:.1f} mV | {_p['Vdrop_sw']*1e3:.1f} mV |
+    | | | |
+    | Ratio efficiency | {_n['eta_ratio']*100:.0f}% (Vpe/Vin) | 100% (no ratio loss) |
+    | Conduction loss | {_n['P_cond']*1e3:.2f} mW | {_p['P_cond']*1e3:.2f} mW |
+    | Gate drive loss | {_n['P_gate']*1e3:.2f} mW | {_p['P_gate']*1e3:.2f} mW |
+    | **Efficiency** | **{_n['eta_total']*100:.1f}%** | **{_p['eta_total']*100:.1f}%** |
+    | | | |
+    | ΔV perturbation (top) | — | {_p['delta_v']*1e3:.1f} mV |
+    | Max pump current | — | {_p['I_max_pump']*1e3:.0f} mA |
 
-    _colors = {"1:1": "#4e79a7", "2:1": "#e15759"}
-    fig_gear, ax_gear = plt.subplots(figsize=(9, 5))
+    **System impact**: balancer loss at worst-case mismatch =
+    {max(_n['P_cond'] + _n['P_gate'], _p['P_cond'] + _p['P_gate'])*1e3:.1f} mW
+    = **{max(_n['P_cond'] + _n['P_gate'], _p['P_cond'] + _p['P_gate']) / Pload_total * 100:.2f}%**
+    of total load power ({Pload_total*1e3:.0f} mW).
 
-    for _gname, *_ in GEARS:
-        _valid = ~np.isnan(gear_etas[_gname])
-        if _valid.any():
-            ax_gear.plot(
-                Vin_sweep[_valid], gear_etas[_gname][_valid],
-                color=_colors.get(_gname, "gray"), alpha=0.4, linewidth=1,
-                label=f"{_gname} gear",
-            )
-
-    ax_gear.plot(Vin_sweep, eta_best, "k-", linewidth=2.5, label="Best gear")
-    ax_gear.axhline(
-        ui_eta_target.value, color="r", linestyle="--", linewidth=1,
-        label=f"Target: {ui_eta_target.value}%",
-    )
-    ax_gear.set_xlabel("Input voltage (V)")
-    ax_gear.set_ylabel("Efficiency (%)")
-    ax_gear.set_ylim(40, 100)
-    ax_gear.legend(loc="lower right")
-    ax_gear.grid(True, alpha=0.3)
-    ax_gear.set_title(
-        f"String supply: {ui_n_stages.value}×{ui_vpe.value:.2f}V "
-        f"= {Vstring:.2f}V, {Iload:.1f}A"
-    )
-    fig_gear
-    return A_sw, Cfly, Iload, Vstring, fsw
-
-
-@app.cell
-def _(mo, ui_vin_max, ui_vin_min):
-    ui_vin_point = mo.ui.slider(
-        start=ui_vin_min.value,
-        stop=ui_vin_max.value,
-        step=0.01,
-        value=round((ui_vin_min.value + ui_vin_max.value) / 2, 2),
-        label="Operating point Vin (V)",
-    )
-    mo.vstack([mo.md("## Design Point Details"), ui_vin_point])
-    return (ui_vin_point,)
-
-
-@app.cell
-def _(A_sw, Cfly, Iload, Vstring, dev, fsw, mo, sc_analysis, ui_vin_point):
-    Vin_pt = ui_vin_point.value
-    results = sc_analysis(dev, Vin_pt, Vstring, Iload, fsw, Cfly, A_sw)
-
-    if not results:
-        mo.md(
-            f"**No gear can reach {Vstring:.2f}V from Vin = {Vin_pt:.2f}V.** "
-            "Increase Vin or reduce string voltage."
-        )
-    else:
-        best_name = max(results, key=lambda g: results[g]["eta_total"])
-        b = results[best_name]
-
-        mo.md(f"""
-    ### At Vin = {Vin_pt:.2f} V — best gear: **{best_name}**
-
-    | | Value |
-    |---|---|
-    | Ideal gear output | {b['Vout_ideal']:.3f} V |
-    | Ratio efficiency | {b['eta_ratio']*100:.1f}% |
-    | | |
-    | Switches | {b['n_sw']} × {b['Ron_sw']*1e3:.1f} mΩ |
-    | **R_out** | **{b['R_out']*1e3:.1f} mΩ** |
-    | | |
-    | Conduction loss | {b['P_cond']*1e3:.1f} mW |
-    | Gate drive loss | {b['P_gate']*1e3:.1f} mW |
-    | Ratio loss | {Vstring * Iload * (1/b['eta_ratio'] - 1)*1e3:.1f} mW |
-    | | |
-    | **Efficiency** | **{b['eta_total']*100:.1f}%** |
-    | **Load regulation** | **{b['load_reg']*100:.1f}%** |
+    > *Normal mode ratio efficiency is low ({_n['eta_ratio']*100:.0f}%) because
+    > the battery ({Vin:.1f} V) is much higher than Vpe ({Vpe:.2f} V).
+    > This is acceptable — the wasted power is only
+    > {Imis * (Vin - Vpe) * 1e3:.1f} mW (mismatch current × excess voltage).*
     """)
-    return (results,)
+    return A_bal, Cfly, Imis, Pload_total, Vin, Vpe, bal, fsw
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md("""
-    ### Loss Breakdown at Operating Point
+    ### Loss Breakdown by Mode
     """)
     return
 
 
 @app.cell
-def _(Iload, Vstring, plt, results):
-    if results:
-        _best = max(results, key=lambda g: results[g]["eta_total"])
-        _b = results[_best]
-        _Pload = Vstring * Iload
-        _P_ratio = _Pload * (1 / _b["eta_ratio"] - 1)
+def _(Imis, Vin, Vpe, bal, plt):
+    _fig, (_ax_n, _ax_p) = plt.subplots(1, 2, figsize=(8, 3.5))
 
-        _losses = [_P_ratio * 1e3, _b["P_cond"] * 1e3, _b["P_gate"] * 1e3]
-        _labels = [
-            f"Ratio\n{_losses[0]:.1f} mW",
-            f"Conduction\n{_losses[1]:.1f} mW",
-            f"Gate drive\n{_losses[2]:.1f} mW",
-        ]
-        _colors = ["#59a14f", "#4e79a7", "#f28e2b"]
+    _n = bal["normal"]
+    _p = bal["pump"]
+    _P_ratio_n = Imis * (Vin - Vpe)  # power wasted in ratio loss
 
-        _fig_pie, _ax_pie = plt.subplots(figsize=(4, 4))
-        _ax_pie.pie(
-            _losses, labels=_labels, colors=_colors,
-            autopct="%.0f%%", startangle=90,
-        )
-        _ax_pie.set_title(f"Loss breakdown ({_best} gear)")
-        _fig_pie
-    return
+    # Normal mode
+    _losses_n = [_P_ratio_n * 1e3, _n["P_cond"] * 1e3, _n["P_gate"] * 1e3]
+    _labels_n = [
+        f"Ratio\n{_losses_n[0]:.1f} mW",
+        f"Ron\n{_losses_n[1]:.2f} mW",
+        f"Gate\n{_losses_n[2]:.2f} mW",
+    ]
+    _colors = ["#59a14f", "#4e79a7", "#f28e2b"]
+    _ax_n.pie(_losses_n, labels=_labels_n, colors=_colors,
+              autopct="%.0f%%", startangle=90)
+    _ax_n.set_title(f"Normal mode\n(η = {_n['eta_total']*100:.0f}%)", fontsize=10)
 
+    # Pump mode
+    _losses_p = [_p["P_cond"] * 1e3, _p["P_gate"] * 1e3]
+    _labels_p = [
+        f"Ron\n{_losses_p[0]:.2f} mW",
+        f"Gate\n{_losses_p[1]:.2f} mW",
+    ]
+    _ax_p.pie(_losses_p, labels=_labels_p, colors=_colors[1:],
+              autopct="%.0f%%", startangle=90)
+    _ax_p.set_title(f"Pump mode\n(η = {_p['eta_total']*100:.0f}%)", fontsize=10)
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Mid-Point Balancer
-
-    The balancer keeps each PE at its target voltage by handling the
-    **mismatch current** (±10% of load).
-
-    We reuse the same flying-capacitor topology, with additional switches
-    to connect Cfly across either segment of the string.
-
-    ### Two operating modes
-
-    **Normal mode** (Vmid too low — top PE draws less):
-    Standard 2:1 from battery into the bottom segment, same circuit as
-    the string supply but scaled for the mismatch current only.
-
-    **Pump mode** (Vmid too high — bottom PE draws less):
-    - Phase 1: connect Cfly across bottom segment (Vmid → GND) — charges
-      to Vmid
-    - Phase 2: connect Cfly across top segment (Vstring → Vmid) — dumps
-      charge, raising V_top
-
-    The top segment briefly goes over-voltage, but the string supply has
-    the bandwidth to compensate by backing off. Net effect: charge moves
-    from bottom to top, Vmid drops back toward target.
-
-    > *Note: a "top → bottom" pump mode (reverse of pump mode) is also
-    > possible with the same switch fabric — worth exploring for
-    > symmetry, but not needed for the first product.*
-
-    ### Cap sizing concern
-
-    In pump mode, the voltage perturbation on the top segment when Cfly
-    dumps its charge is:
-
-    $$\Delta V_{top} = \frac{C_{fly}}{C_{fly} + C_{decoupling}} \cdot (V_{mid} - V_{pe,target})$$
-
-    If C_decoupling (off-chip) is small relative to Cfly, the perturbation
-    is large — which either forces a small Cfly (limiting charge transfer
-    per cycle, requiring higher pump frequency) or a large decoupling cap.
-    """)
-    return
-
-
-@app.cell
-def _(dev, np, mo, ui_iload, ui_mismatch, ui_sw_area, ui_vpe, ui_fsw, ui_cfly):
-    Imis = ui_iload.value * (ui_mismatch.value / 100)
-    Vpe = ui_vpe.value
-    Pload_total = Vpe * ui_iload.value * 2  # both PEs
-
-    # Charge transfer per cycle: Q = Cfly × ΔV
-    # In pump mode, Cfly charges to Vmid ≈ Vpe + δ, then dumps to top segment.
-    # Charge transferred per cycle ≈ Cfly × δ where δ is the overvoltage.
-    # For steady state: Imis = Cfly × δ × fsw → δ = Imis / (Cfly × fsw)
-    _Cfly = ui_cfly.value * 1e-9  # F
-    _fsw = ui_fsw.value * 1e6     # Hz
-    _delta_v = Imis / (_Cfly * _fsw) if _Cfly * _fsw > 0 else float('inf')
-
-    # Balancer switch sizing (same Ron budget as before)
-    _V_error_budget = 0.05 * Vpe
-    _Ron_bal_max = _V_error_budget / Imis if Imis > 0 else 1e6
-    _A_bal_min = dev.Ron_sp / _Ron_bal_max
-    _A_bal_um2 = _A_bal_min * 1e12
-    _sw_area_mm2 = ui_sw_area.value
-
-    # SC balancer efficiency: ratio loss is small (pumping within Vpe range)
-    # Main loss is conduction: I² × Ron × duty
-    # For 4 balancer switches sharing the balancer area budget
-    _n_bal_sw = 4
-    _A_per_bal_sw = _A_bal_min  # minimum area per switch
-    _Ron_bal_sw = dev.Ron_sp / _A_per_bal_sw if _A_per_bal_sw > 0 else float('inf')
-    _P_bal_cond = Imis**2 * _Ron_bal_sw * 2  # 2 switches in path at a time
-
-    mo.md(f"""
-    ### Balancer Sizing (SC pump)
-
-    | | Value |
-    |---|---|
-    | Mismatch current | ±{Imis:.2f} A ({ui_mismatch.value}% of {ui_iload.value:.1f} A) |
-    | PE voltage | {Vpe:.2f} V |
-    | | |
-    | **Pump mode ΔV on top segment** | **{_delta_v*1e3:.1f} mV** |
-    | (using string supply's Cfly = {ui_cfly.value} nF @ {ui_fsw.value} MHz) | |
-    | | |
-    | Balancer switches | {_n_bal_sw} × {_Ron_bal_sw*1e3:.1f} mΩ |
-    | Min area per switch | {_A_bal_um2:.0f} µm² |
-    | Conduction loss | {_P_bal_cond*1e3:.1f} mW |
-    | As % of total load | {_P_bal_cond / Pload_total * 100:.2f}% |
-    | | |
-    | String supply switch area (comparison) | {_sw_area_mm2:.2f} mm² |
-    """)
+    _fig.suptitle(f"Balancer losses at ±{Imis*1e3:.0f} mA mismatch", fontsize=11)
+    _fig.tight_layout()
+    _fig
     return
 
 
 # ===================================================================
-# Switch waveforms
+# Switch waveforms — normal mode (1:1)
 # ===================================================================
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Switch Waveforms (2:1 gear)
+    ## Switch Waveforms
 
-    Idealized Vds and Ids for each switch through two complete cycles.
+    Idealized Vds and Ids for each switch through several cycles.
     These show what the transistors actually see — the key information
-    for device design.
+    for device optimization.
 
-    Refer to the flying-capacitor diagram above:
-    - **Phase 1 (series)**: SW1, SW2 on; SW3, SW4 off
-    - **Phase 2 (parallel)**: SW3, SW4 on; SW1, SW2 off
+    ### Normal mode (1:1 from battery)
+
+    Two switches form a half-bridge, alternately connecting Cfly to
+    the battery (charge) and to the bottom segment (discharge).
     """)
     return
 
 
 @app.cell
-def _(
-    dev, np, plt,
-    Vstring, Iload, fsw, Cfly, A_sw,
-    ui_vin_point,
-):
-    _Vin = ui_vin_point.value
-    _Vout = Vstring
-    _T = 1.0 / fsw          # period (s)
-    _dt = _T / 200           # time step
-    _t = np.arange(0, 3 * _T, _dt)  # 3 cycles
-    _n_sw = 4
-    _Ron = dev.Ron_sp / (A_sw / _n_sw)
+def _(A_bal, Imis, Vin, Vpe, dev, fsw, np, plt):
+    _T = 1.0 / fsw
+    _t = np.arange(0, 3 * _T, _T / 200)
+    _n_sw = 2
+    _Ron = dev.Ron_sp / (A_bal / _n_sw)
 
-    # Cfly voltage: in steady state, Vcfly ≈ Vin - Vout for 2:1
-    _Vcfly = _Vin - _Vout
-
-    # Phase signal: 0 = phase1 (series, SW1+SW2 on), 1 = phase2 (parallel, SW3+SW4 on)
     _phase = ((_t % _T) >= _T / 2).astype(float)
-    _ph1 = _phase == 0  # series phase
-    _ph2 = _phase == 1  # parallel phase
+    _ph1 = _phase == 0  # charge from battery
+    _ph2 = _phase == 1  # discharge to bottom segment
 
-    # --- SW1: between Vin and Cfly+ ---
-    # On in phase 1: Vds ≈ Iload × Ron, Ids = Iload
-    # Off in phase 2: Vds ≈ Vin - Vout (blocks Vcfly), Ids = 0
-    _sw1_vds = np.where(_ph1, Iload * _Ron, _Vcfly)
-    _sw1_ids = np.where(_ph1, Iload, 0)
-
-    # --- SW2: between Cfly- and GND ---
-    # On in phase 1: Vds ≈ Iload × Ron, Ids = Iload
-    # Off in phase 2: Vds ≈ Vout (blocks output voltage), Ids = 0
-    _sw2_vds = np.where(_ph1, Iload * _Ron, _Vout)
-    _sw2_ids = np.where(_ph1, Iload, 0)
-
-    # --- SW3: between Cfly+ and Vout ---
-    # Off in phase 1: Vds ≈ Vin - Vout (blocks Vcfly), Ids = 0
-    # On in phase 2: Vds ≈ Iload × Ron, Ids = Iload
-    _sw3_vds = np.where(_ph2, Iload * _Ron, _Vcfly)
-    _sw3_ids = np.where(_ph2, Iload, 0)
-
-    # --- SW4: between Cfly- and Vout ---
-    # Off in phase 1: Vds ≈ Vout, Ids = 0
-    # On in phase 2: Vds ≈ Iload × Ron, Ids = Iload
-    _sw4_vds = np.where(_ph2, Iload * _Ron, _Vout)
-    _sw4_ids = np.where(_ph2, Iload, 0)
+    # S1: battery side — on in phase 1
+    _s1_vds = np.where(_ph1, Imis * _Ron, Vin - Vpe)
+    _s1_ids = np.where(_ph1, Imis, 0)
+    # S2: bottom segment side — on in phase 2
+    _s2_vds = np.where(_ph2, Imis * _Ron, Vpe)
+    _s2_ids = np.where(_ph2, Imis, 0)
 
     _switches = [
-        ("SW1\n(Vin → Cfly+)", _sw1_vds, _sw1_ids),
-        ("SW2\n(Cfly− → GND)", _sw2_vds, _sw2_ids),
-        ("SW3\n(Cfly+ → Vout)", _sw3_vds, _sw3_ids),
-        ("SW4\n(Vout → Cfly−)", _sw4_vds, _sw4_ids),
+        ("S1 (battery side)", _s1_vds, _s1_ids),
+        ("S2 (bottom segment side)", _s2_vds, _s2_ids),
     ]
 
-    _fig_sw, _axes = plt.subplots(4, 2, figsize=(10, 8), sharex=True)
-    _t_us = _t * 1e6  # convert to µs
+    _fig, _axes = plt.subplots(2, 2, figsize=(9, 4), sharex=True)
+    _t_us = _t * 1e6
 
     for _i, (_name, _vds, _ids) in enumerate(_switches):
         _axes[_i, 0].plot(_t_us, _vds * 1e3, color="#e15759", linewidth=1.5)
@@ -622,69 +465,144 @@ def _(
 
     _axes[-1, 0].set_xlabel("Time (µs)")
     _axes[-1, 1].set_xlabel("Time (µs)")
-    _fig_sw.suptitle(
-        f"Switch waveforms: 2:1 gear, Vin={_Vin:.2f}V, "
-        f"Vout={_Vout:.2f}V, {Iload:.1f}A, {fsw/1e6:.0f}MHz",
+    _fig.suptitle(
+        f"Normal mode: 1:1, Vin={Vin:.1f}V → {Vpe:.2f}V, "
+        f"{Imis*1e3:.0f}mA, {fsw/1e6:.0f}MHz",
         fontsize=10,
     )
-    _fig_sw.tight_layout()
-    _fig_sw
-
+    _fig.tight_layout()
+    _fig
     return
 
 
+# ===================================================================
+# Switch waveforms — pump mode
+# ===================================================================
 @app.cell(hide_code=True)
-def _(dev, mo, A_sw, Iload, Vstring, ui_vin_point):
-    _Vin = ui_vin_point.value
-    _Vout = Vstring
-    _Vcfly = _Vin - _Vout
-    _n_sw = 4
-    _Ron = dev.Ron_sp / (A_sw / _n_sw)
+def _(mo):
+    mo.md(r"""
+    ### Pump mode (bottom → top)
 
-    mo.md(f"""
-    ### Switch Stress Summary
+    Four switches reconfigure Cfly between the bottom segment (charge)
+    and top segment (discharge). Only the mismatch current flows.
 
-    | Switch | Blocks (off) | Carries (on) | On-state Vds |
-    |--------|-------------|-------------|-------------|
-    | SW1 (Vin → Cfly+) | {_Vcfly*1e3:.0f} mV | {Iload*1e3:.0f} mA | {Iload*_Ron*1e3:.1f} mV |
-    | SW2 (Cfly− → GND) | {_Vout*1e3:.0f} mV | {Iload*1e3:.0f} mA | {Iload*_Ron*1e3:.1f} mV |
-    | SW3 (Cfly+ → Vout) | {_Vcfly*1e3:.0f} mV | {Iload*1e3:.0f} mA | {Iload*_Ron*1e3:.1f} mV |
-    | SW4 (Vout → Cfly−) | {_Vout*1e3:.0f} mV | {Iload*1e3:.0f} mA | {Iload*_Ron*1e3:.1f} mV |
-
-    All off-state voltages are well below 1 V — no BV concern. The on-state
-    Vds ({Iload*_Ron*1e3:.1f} mV) is the Ron × Iload drop across each switch.
-
-    **Note**: SW1 and SW3 have their source above ground — they need
-    **bootstrap gate drive** (gate must be > source + Vth to turn on).
-    SW2 and SW4 are ground-referenced and can use direct gate drive.
+    - **Phase 1**: S1, S2 on — Cfly charges across bottom segment (Vmid → GND)
+    - **Phase 2**: S3, S4 on — Cfly dumps into top segment (Vstring → Vmid)
     """)
     return
 
 
+@app.cell
+def _(A_bal, Imis, Vpe, dev, fsw, np, plt):
+    _T = 1.0 / fsw
+    _t = np.arange(0, 3 * _T, _T / 200)
+    _n_sw = 4
+    _Ron = dev.Ron_sp / (A_bal / _n_sw)
+
+    _phase = ((_t % _T) >= _T / 2).astype(float)
+    _ph1 = _phase == 0  # charge across bottom
+    _ph2 = _phase == 1  # dump to top
+
+    # In pump mode, voltages across each switch when off are ~Vpe
+    # S1: Vmid-side of bottom — on in phase 1
+    _s1_vds = np.where(_ph1, Imis * _Ron, Vpe)
+    _s1_ids = np.where(_ph1, Imis, 0)
+    # S2: GND-side of bottom — on in phase 1
+    _s2_vds = np.where(_ph1, Imis * _Ron, Vpe)
+    _s2_ids = np.where(_ph1, Imis, 0)
+    # S3: Vstring-side of top — on in phase 2
+    _s3_vds = np.where(_ph2, Imis * _Ron, Vpe)
+    _s3_ids = np.where(_ph2, Imis, 0)
+    # S4: Vmid-side of top — on in phase 2
+    _s4_vds = np.where(_ph2, Imis * _Ron, Vpe)
+    _s4_ids = np.where(_ph2, Imis, 0)
+
+    _switches = [
+        ("S1 (Vmid → Cfly+)", _s1_vds, _s1_ids),
+        ("S2 (Cfly− → GND)", _s2_vds, _s2_ids),
+        ("S3 (Vstring → Cfly+)", _s3_vds, _s3_ids),
+        ("S4 (Cfly− → Vmid)", _s4_vds, _s4_ids),
+    ]
+
+    _fig, _axes = plt.subplots(4, 2, figsize=(9, 7), sharex=True)
+    _t_us = _t * 1e6
+
+    for _i, (_name, _vds, _ids) in enumerate(_switches):
+        _axes[_i, 0].plot(_t_us, _vds * 1e3, color="#e15759", linewidth=1.5)
+        _axes[_i, 0].set_ylabel("Vds (mV)")
+        _axes[_i, 0].set_title(_name, fontsize=9, loc="left")
+        _axes[_i, 0].grid(True, alpha=0.3)
+
+        _axes[_i, 1].plot(_t_us, _ids * 1e3, color="#4e79a7", linewidth=1.5)
+        _axes[_i, 1].set_ylabel("Ids (mA)")
+        _axes[_i, 1].grid(True, alpha=0.3)
+
+    _axes[-1, 0].set_xlabel("Time (µs)")
+    _axes[-1, 1].set_xlabel("Time (µs)")
+    _fig.suptitle(
+        f"Pump mode: bottom→top, Vpe={Vpe:.2f}V, "
+        f"{Imis*1e3:.0f}mA, {fsw/1e6:.0f}MHz",
+        fontsize=10,
+    )
+    _fig.tight_layout()
+    _fig
+    return
+
+
+# ===================================================================
+# Switch stress summary
+# ===================================================================
 @app.cell(hide_code=True)
-def _(mo, results, ui_eta_target, ui_lr_target, ui_vin_point):
-    if not results:
-        mo.md("**Cannot evaluate** — no gear reaches target at this Vin.")
-    else:
-        _best = max(results, key=lambda g: results[g]["eta_total"])
-        _b = results[_best]
+def _(A_bal, Imis, Vin, Vpe, dev, mo):
+    _Ron_2 = dev.Ron_sp / (A_bal / 2)   # normal mode: 2 switches
+    _Ron_4 = dev.Ron_sp / (A_bal / 4)   # pump mode: 4 switches
 
-        _eta_ok = _b["eta_total"] * 100 >= ui_eta_target.value
-        _lr_ok = _b["load_reg"] * 100 <= ui_lr_target.value
+    mo.md(f"""
+    ### Switch Stress Summary
 
-        def _badge(ok):
-            return "PASS" if ok else "**FAIL**"
+    | | Normal mode (2 switches) | Pump mode (4 switches) |
+    |---|---|---|
+    | Max off-state Vds | {(Vin - Vpe)*1e3:.0f} mV | {Vpe*1e3:.0f} mV |
+    | On-state current | {Imis*1e3:.0f} mA | {Imis*1e3:.0f} mA |
+    | On-state Vds | {Imis*_Ron_2*1e3:.1f} mV | {Imis*_Ron_4*1e3:.1f} mV |
+    | Ron per switch | {_Ron_2*1e3:.1f} mΩ | {_Ron_4*1e3:.1f} mΩ |
 
-        mo.md(f"""
-    ## Pass / Fail (at Vin = {ui_vin_point.value:.2f} V, gear {_best})
+    All voltages well below 1 V — no breakdown concern.
+    Normal-mode S1 needs **bootstrap gate drive** (source above ground).
+    Pump-mode S1, S3 need bootstrap drive.
+    """)
+    return
+
+
+# ===================================================================
+# Pass / Fail
+# ===================================================================
+@app.cell(hide_code=True)
+def _(Imis, Pload_total, Vin, Vpe, bal, mo):
+    _n = bal["normal"]
+    _p = bal["pump"]
+    _worst_loss = max(
+        _n["P_cond"] + _n["P_gate"] + Imis * (Vin - Vpe),  # normal includes ratio
+        _p["P_cond"] + _p["P_gate"],
+    )
+    _sys_impact_pct = _worst_loss / Pload_total * 100
+
+    _bal_eta_ok = min(_n["eta_total"], _p["eta_total"]) * 100 >= 50
+    _sys_ok = _sys_impact_pct <= 5  # ≤5% system loss from balancer
+
+    def _badge(ok):
+        return "PASS" if ok else "**FAIL**"
+
+    mo.md(f"""
+    ## Pass / Fail
 
     | Criterion | Target | Actual | Result |
     |-----------|--------|--------|--------|
-    | Efficiency | ≥ {ui_eta_target.value}% | {_b['eta_total']*100:.1f}% | {_badge(_eta_ok)} |
-    | Load regulation | ≤ {ui_lr_target.value}% | {_b['load_reg']*100:.1f}% | {_badge(_lr_ok)} |
+    | Balancer efficiency (worst mode) | ≥ 50% | {min(_n['eta_total'], _p['eta_total'])*100:.1f}% | {_badge(_bal_eta_ok)} |
+    | System loss from balancer | ≤ 5% of load | {_sys_impact_pct:.2f}% | {_badge(_sys_ok)} |
 
-    *Check at both Vin min ({ui_vin_point.start:.2f}V) and max ({ui_vin_point.stop:.2f}V)
-    for full-range validation.*
+    *The 50% balancer target is deliberately relaxed — at 10% mismatch
+    current, even 50% efficiency only costs ~5% at the system level.*
     """)
     return
 

@@ -2,7 +2,7 @@
 Shared device model for BEOL transistor point-of-load power supply analysis.
 
 Silicon limits and channel-dominated MOSFET model for low-voltage (≤3V)
-back-end devices with ~28nm lithography.
+back-end devices with ~100nm lithography (middle metal layers, ~M5).
 """
 
 import numpy as np
@@ -42,11 +42,11 @@ class DeviceModel:
 
 
 def compute_device(
-    Lg_nm: float = 28,
+    Lg_nm: float = 100,
     mobility_pct: float = 60,
     Vgs: float = 0.9,
     Vth: float = 0.3,
-    Ron_sp_mohm_mm2: float = 0.5,
+    Ron_sp_mohm_mm2: float = 3.0,
 ) -> DeviceModel:
     """Compute device characteristics.
 
@@ -136,7 +136,7 @@ def device_sliders(mo):
     """Create standard device parameter sliders. Returns dict of UI elements."""
     return {
         "lg": mo.ui.slider(
-            start=28, stop=100, step=2, value=28,
+            start=50, stop=200, step=10, value=100,
             label="Gate length (nm)",
         ),
         "mobility_pct": mo.ui.slider(
@@ -152,7 +152,7 @@ def device_sliders(mo):
             label="Threshold voltage (V)",
         ),
         "ron_sp": mo.ui.slider(
-            start=0.05, stop=5.0, step=0.05, value=0.5,
+            start=0.1, stop=20.0, step=0.1, value=3.0,
             label="Ron,sp — your device (mΩ·mm²)",
         ),
     }
