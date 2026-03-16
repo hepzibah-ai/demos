@@ -140,27 +140,51 @@ The singular values tell you how much variance each direction captures.
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## §2 — PCA on real embeddings
-
-        Now the same idea on GloVe-50d. We pick a curated set of ~40 words
-        spanning several intuitive categories (living things, objects,
-        abstract concepts, natural features) and ask PCA to find the
-        dominant axes.
-
-        PCA doesn't know our categories. It finds whatever directions
-        capture the most variance. Let's see if they're interpretable.
-        """
-    )
-
-
-@app.cell
-def _(mo):
     """Load GloVe model (shared across notebook)."""
     import gensim.downloader as api
     glove_model = api.load("glove-wiki-gigaword-50")
     return (glove_model,)
+
+
+@app.cell
+def _(glove_model, mo):
+    import numpy as _np
+
+    # GloVe is trained so that dot(u, v) ≈ log(co-occurrence count).
+    # We can't show the raw matrix, but the dot products ARE the signal.
+    _pairs = [
+        ("king", "his"), ("king", "her"),
+        ("queen", "her"), ("queen", "his"),
+        ("king", "throne"), ("king", "table"),
+        ("dog", "bark"), ("dog", "meow"),
+    ]
+    _rows = []
+    for _a, _b in _pairs:
+        _va, _vb = glove_model[_a], glove_model[_b]
+        _dot = float(_np.dot(_va, _vb))
+        _rows.append(f"| {_a} · {_b} | {_dot:+.1f} |")
+    _table = "\n".join(_rows)
+
+    mo.md(f"""## §2 — PCA on real embeddings
+
+GloVe vectors are trained so that **dot(u, v) ≈ log(co-occurrence
+count)** — words that appear near each other in text have higher dot
+products. We don't have the raw co-occurrence matrix, but the dot
+products *are* the signal:
+
+| Word pair | Dot product |
+|-----------|-------------|
+{_table}
+
+"King · his" > "king · her" because "king" and "his" co-occur more
+often in the training corpus. PCA on these vectors will find the
+directions along which these co-occurrence patterns vary the most.
+
+Now we pick ~40 words spanning several intuitive categories and ask
+PCA to find the dominant axes. PCA doesn't know our categories — it
+finds whatever directions capture the most variance.
+""")
+
 
 
 @app.cell
@@ -240,17 +264,33 @@ def _(glove_model, mo):
     _plt.close(_fig)
     _buf.seek(0)
 
+    # Dynamically describe each PC by category centroids (sign is arbitrary)
+    def _describe_pc(pc_idx, ax_name):
+        _centroids = {}
+        for _g in _word_groups:
+            _mask = [i for i, g in enumerate(_groups) if g == _g]
+            _centroids[_g] = float(_np.mean(_coords[_mask, pc_idx]))
+        _sorted = sorted(_centroids.items(), key=lambda x: x[1])
+        _neg = ", ".join(s[0] for s in _sorted[:2])
+        _pos = ", ".join(s[0] for s in _sorted[-2:])
+        return f"**{ax_name}** ({_var_explained[pc_idx]:.1%}): {_neg} ← → {_pos}"
+
+    _pc1_desc = _describe_pc(0, "PC1")
+    _pc2_desc = _describe_pc(1, "PC2")
+    _pc3_desc = _describe_pc(2, "PC3")
+
     mo.vstack([
         mo.image(_buf.read(), width=900),
         mo.md(f"""
-**PC1** ({_var_explained[0]:.1%} of variance) roughly separates
-concrete/natural words (left) from abstract/societal words (right).
-**PC2** ({_var_explained[1]:.1%}) separates natural landscape (bottom)
-from manufactured objects (top). **PC3** ({_var_explained[2]:.1%})
-separates living/emotional (bottom) from built/industrial (top).
+Look at where the category clusters land on each axis:
+
+- {_pc1_desc}
+- {_pc2_desc}
+- {_pc3_desc}
 
 None of these axes were designed — PCA discovered them from the
-co-occurrence statistics encoded in GloVe.
+co-occurrence statistics encoded in GloVe. The sign of each PC is
+arbitrary (you could flip any axis), but the *separation* is real.
 """),
     ])
 
