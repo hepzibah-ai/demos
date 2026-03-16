@@ -168,16 +168,17 @@ def _(glove_model, mo):
     mo.md(f"""## §2 — PCA on real embeddings
 
 GloVe vectors are trained so that **dot(u, v) ≈ log(co-occurrence
-count)** — words that appear near each other in text have higher dot
-products. We don't have the raw co-occurrence matrix, but the dot
-products *are* the signal:
+count)** — where "co-occurrence" means appearing within a **10-word
+sliding window** in the training corpus (Wikipedia + Gigaword, ~6B
+tokens), weighted by 1/distance. We don't have the raw co-occurrence
+matrix, but the dot products *are* the signal:
 
 | Word pair | Dot product |
 |-----------|-------------|
 {_table}
 
-"King · his" > "king · her" because "king" and "his" co-occur more
-often in the training corpus. PCA on these vectors will find the
+"King · his" > "king · her" because "king" and "his" appear near each
+other more often in the training text. PCA on these vectors will find the
 directions along which these co-occurrence patterns vary the most.
 
 Now we pick ~40 words spanning several intuitive categories and ask
