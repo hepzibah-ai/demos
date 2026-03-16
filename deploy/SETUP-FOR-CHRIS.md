@@ -1,109 +1,168 @@
-# Tutorial server — DNS + HTTPS setup
+# Tutorial & Notebook Server — Setup Brief for IT
 
-The tutorial server is already running on the Linode at
-`http://172.105.0.10:8081/`. This doc covers what's needed to put it
-behind `https://tutorials.hepzibah.ai` with proper auth.
+**Audience**: Chris (IT/infrastructure).
+**Last updated**: 2026-03-16.
 
-## What's already done
+This describes what we need on the corporate server to host interactive
+tutorial notebooks and internal documentation. We're moving off the
+temporary Linode (172.105.0.10) onto corporate infrastructure.
 
-- Docker container serving marimo notebooks on port 8081
-- Caddy is already installed on the Linode (used by sim0 customer demos on 8080)
-- Container auto-restarts (`restart: unless-stopped`)
+---
 
-## What's needed
+## What this is
 
-### 1. DNS record
+Interactive Python notebooks served as web pages. Engineers open a URL
+in their browser and get a live tutorial with plots, sliders, and text.
+No software installation needed on the user's laptop — it all runs
+server-side.
 
-Add an A record for `tutorials.hepzibah.ai` pointing to `172.105.0.10`.
+There are currently two repos that need serving:
 
-Where: wherever we manage DNS for hepzibah.ai (same place as the existing
-records for the sim0 customer demos).
+| Repo | What | Notebooks | Audience |
+|------|------|-----------|----------|
+| `demos` | Math/ML tutorial series (tokenizer, embeddings, PCA, etc.) | 7 marimo notebooks | Everyone — onboarding, customer demos |
+| `sim0/tutorials` | Chip architecture walkthroughs | TBD (will migrate to marimo) | Engineering team |
 
-### 2. Caddy reverse proxy + auto-HTTPS
+Both are pure Python — no GPUs, no CUDA, no heavy compute. The
+workload is a web server delivering pre-rendered plots and lightweight
+interactive calculations (dot products on 50-dimensional vectors, small
+matrix decompositions).
 
-SSH into the Linode and add a block to `/etc/caddy/Caddyfile`:
+---
+
+## What we need
+
+### 1. A Docker host
+
+The server runs as a single Docker container per repo. Requirements:
+
+| Resource | demos (current) | sim0/tutorials (future) |
+|----------|----------------|------------------------|
+| Docker image size | ~900 MB | TBD, similar |
+| RAM at rest | ~800 MB | TBD |
+| RAM under load | ~1.2 GB (GloVe model + concurrent users) | TBD |
+| CPU | Negligible (<1% idle, brief spikes on page load) | TBD |
+| Disk | ~2 GB (image + model cache) | TBD |
+| Ports | 8081 (tutorials) | 8082 or similar |
+
+Total: a **2-core, 4 GB RAM** VM would be comfortable for both. Even
+a shared machine with other lightweight services would be fine — the
+load is bursty and small.
+
+Docker and Docker Compose are the only dependencies on the host.
+(`docker-compose` v2 or `docker compose` — either works.)
+
+### 2. HTTPS reverse proxy
+
+We need a domain (e.g. `tutorials.hepzibah.ai`) with:
+- DNS A record → corporate server IP
+- HTTPS termination (Let's Encrypt via Caddy is simplest, but any
+  reverse proxy works — nginx, Traefik, whatever you already use for
+  the CAD tools)
+- Reverse proxy: `tutorials.hepzibah.ai/` → `localhost:8081`
+
+Optional: basic auth or OAuth if we want to restrict access. The
+notebooks contain no secrets, but they're internal content.
+
+### 3. Git access for deployments
+
+We deploy by pushing to GitHub and pulling on the server. The workflow:
 
 ```
-tutorials.hepzibah.ai {
-    reverse_proxy localhost:8081
-}
+Developer laptop                    Server
+      │                                │
+      │  git push origin main          │
+      │──────────────────────────────► │
+      │                                │  git pull
+      │                                │  docker-compose up -d --build
+      │                                │  (rebuilds container, ~30s)
+      │                                │
 ```
 
-Then reload:
+The server needs:
+- **Git** installed
+- **Read access** to `github.com/hepzibah-ai/demos` (deploy key or
+  personal access token — whatever you use for the CAD repos)
+- A clone of the repo (one-time: `git clone ... ~/demos`)
+
+Currently we SSH in and run the deploy commands manually. If you
+want to set up a webhook or CI/CD that's great, but manual is fine
+for now — we deploy a few times a week at most.
+
+### 4. The deploy command
+
+After any notebook change, the full deploy is:
 
 ```bash
-sudo systemctl reload caddy
-```
-
-Caddy auto-provisions a Let's Encrypt certificate — no manual cert setup needed.
-Verify with `curl -I https://tutorials.hepzibah.ai/tokenizer`.
-
-### 3. Authentication (not urgent, but do it while you're there)
-
-These are internal onboarding tutorials, not public. Options in rough order
-of preference:
-
-**a) Caddy basic auth** (simplest, fine for now):
-
-```bash
-# Generate a hashed password
-caddy hash-password
-```
-
-```
-tutorials.hepzibah.ai {
-    basicauth /* {
-        hepzibah <hashed-password>
-    }
-    reverse_proxy localhost:8081
-}
-```
-
-Shared credentials are fine for a small team. Put the password in the
-usual place (1Password / shared vault).
-
-**b) Caddy + OAuth proxy** (if we want individual logins later):
-Use `caddy-security` plugin with Google/GitHub OAuth. More setup but
-gives per-user access. Worth doing when we also set up auth for the
-sim0 customer demo server.
-
-### 4. Future: customer demo auth
-
-When we're ready, the sim0 customer demos (port 8080) need proper
-per-customer auth with token-based access. That's a separate task but
-the Caddy + OAuth infrastructure would serve both. Worth planning them
-together.
-
-## Current architecture
-
-```
-Linode 172.105.0.10
-├── Caddy (ports 80/443) ─── reverse proxy + auto-HTTPS
-│   ├── tutorials.hepzibah.ai → localhost:8081
-│   └── [customer demo domain] → localhost:8080
-│
-├── ~/demos/    → tutorial notebooks (this repo)
-│   └── docker container on port 8081
-│
-└── ~/sim0/     → customer demos
-    └── docker container on port 8080
-```
-
-## Useful commands
-
-```bash
-# Check tutorial container status
-docker ps | grep tutorial
-
-# Rebuild after notebook changes
 cd ~/demos
 git pull
 docker-compose -f deploy/docker-compose.yml up -d --build
-
-# Check Caddy status
-sudo systemctl status caddy
-sudo journalctl -u caddy --since "10 min ago"
-
-# Test locally
-curl -I http://localhost:8081/tokenizer
 ```
+
+This rebuilds the Docker image (copies new notebook files, ~30 seconds)
+and restarts the container with zero downtime. The Docker image
+pre-downloads all model files during build, so container startup is
+instant.
+
+---
+
+## What's in the Docker image
+
+The container is self-contained — no external dependencies at runtime:
+
+- **Python 3.12** (slim base)
+- **marimo** — the notebook runtime (serves notebooks as web apps)
+- **FastAPI + uvicorn** — web server
+- **gensim** — loads GloVe word vectors (~70 MB model, pre-downloaded)
+- **tokenizers + huggingface_hub** — loads DeepSeek tokenizer data
+- **numpy, matplotlib, plotly** — computation and plotting
+- **ngspice** — circuit simulator (one notebook uses it)
+
+No GPU drivers. No CUDA. No PyTorch/TensorFlow.
+
+---
+
+## Current notebook inventory
+
+All served from a single container on port 8081:
+
+| Route | Title | What it does |
+|-------|-------|-------------|
+| `/tokenizer` | What's a Token? | Compare tokenizers (GPT-4, DeepSeek) |
+| `/embedding` | What's an Embedding? | Explore GloVe word vectors |
+| `/dot-product` | The Dot Product | Cosine similarity, projection |
+| `/high-dimensions` | High Dimensions | Curse of dimensionality, concentration |
+| `/precision-energy` | Precision and Energy | Number formats, MAC energy, custom silicon |
+| `/pca` | PCA | Dimensionality reduction on embeddings |
+| `/pol-sc` | Switched Capacitor | SPICE simulation (engineering) |
+
+New notebooks get added roughly weekly. Adding one is a code change
+(new `.py` file + one line in `server.py`) — the deploy process is
+the same.
+
+---
+
+## Migration checklist
+
+- [ ] Provision VM or allocate resources on existing server
+- [ ] Install Docker + Docker Compose
+- [ ] Set up DNS A record for `tutorials.hepzibah.ai`
+- [ ] Set up HTTPS reverse proxy → `localhost:8081`
+- [ ] Clone `github.com/hepzibah-ai/demos` with read access
+- [ ] First build: `docker-compose -f deploy/docker-compose.yml up -d --build`
+  (first build takes ~5 min to download Python packages and models; subsequent
+  rebuilds are ~30s due to Docker layer caching)
+- [ ] Verify: `curl -I https://tutorials.hepzibah.ai/tokenizer`
+- [ ] Optional: basic auth, monitoring, log rotation
+- [ ] Decommission Linode 172.105.0.10 (after verifying everything works)
+
+---
+
+## Questions for Chris
+
+1. Do we have a preferred domain? `tutorials.hepzibah.ai` is what we've
+   been planning, but open to alternatives.
+2. Do you already have a reverse proxy running on the corporate servers
+   that we should integrate with, or should we set up Caddy standalone?
+3. Any firewall rules needed for inbound HTTPS (port 443)?
+4. Should we set up a deploy key, or use an existing GitHub access token?
