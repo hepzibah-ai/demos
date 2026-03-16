@@ -2,7 +2,8 @@
 Shared device model for BEOL transistor point-of-load power supply analysis.
 
 Silicon limits and channel-dominated MOSFET model for low-voltage (≤3V)
-back-end devices with ~100nm lithography (middle metal layers, ~M5).
+power switches. Defaults match the ASU PTM 90nm BSIM4 model used for
+SPICE waveforms; adjust sliders for your own process.
 """
 
 import numpy as np
@@ -42,14 +43,16 @@ class DeviceModel:
 
 
 def compute_device(
-    Lg_nm: float = 100,
-    mobility_pct: float = 60,
+    Lg_nm: float = 90,
+    mobility_pct: float = 100,
     Vgs: float = 0.9,
-    Vth: float = 0.3,
-    Ron_sp_mohm_mm2: float = 3.0,
+    Vth: float = 0.40,
+    Ron_sp_mohm_mm2: float = 0.03,
+    tox_nm: float = 2.05,
 ) -> DeviceModel:
     """Compute device characteristics.
 
+    Defaults match the ASU PTM 90nm BSIM4 model used for SPICE waveforms.
     Ron_sp is specified directly in mΩ·mm² (the user/partner knows their
     device better than any formula). The ideal channel Ron,sp is computed
     as a reference.
@@ -58,8 +61,7 @@ def compute_device(
     mu_n = MU_N_BULK * (mobility_pct / 100)
     Vov = max(Vgs - Vth, 0.01)
 
-    # Gate oxide: tox ~ Lg/20, floor at 1.5nm
-    tox = max(Lg / 20, 1.5e-9)
+    tox = tox_nm * 1e-9
     Cox = EPS_OX / tox
 
     # Ideal channel Ron,sp per unit GATE area (Ω·m²)
@@ -106,7 +108,7 @@ def device_summary_md(dev: DeviceModel) -> str:
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | Gate length | {dev.Lg*1e9:.0f} nm | |
-| Oxide thickness | {dev.tox*1e9:.2f} nm | Lg/20, floored at 1.5 nm |
+| Oxide thickness | {dev.tox*1e9:.2f} nm | |
 | Cox | {dev.Cox/1e-3:.1f} fF/µm² | |
 | Effective mobility | {dev.mu_n*1e4:.0f} cm²/V·s | |
 | Overdrive (Vgs−Vth) | {dev.Vov:.2f} V | |
@@ -136,11 +138,11 @@ def device_sliders(mo):
     """Create standard device parameter sliders. Returns dict of UI elements."""
     return {
         "lg": mo.ui.slider(
-            start=50, stop=200, step=10, value=100,
+            start=50, stop=200, step=10, value=90,
             label="Gate length (nm)",
         ),
         "mobility_pct": mo.ui.slider(
-            start=10, stop=100, step=5, value=60,
+            start=10, stop=120, step=5, value=100,
             label="Mobility (% of bulk Si, ~480 cm²/V·s)",
         ),
         "vgs": mo.ui.slider(
@@ -148,11 +150,15 @@ def device_sliders(mo):
             label="Gate drive voltage (V)",
         ),
         "vth": mo.ui.slider(
-            start=0.15, stop=0.5, step=0.01, value=0.3,
+            start=0.15, stop=0.5, step=0.01, value=0.40,
             label="Threshold voltage (V)",
         ),
+        "tox": mo.ui.slider(
+            start=1.0, stop=5.0, step=0.05, value=2.05,
+            label="Oxide thickness (nm)",
+        ),
         "ron_sp": mo.ui.slider(
-            start=0.1, stop=20.0, step=0.1, value=3.0,
+            start=0.01, stop=20.0, step=0.01, value=0.03,
             label="Ron,sp — your device (mΩ·mm²)",
         ),
     }
@@ -166,4 +172,5 @@ def device_from_sliders(dev_ui: dict) -> DeviceModel:
         Vgs=dev_ui["vgs"].value,
         Vth=dev_ui["vth"].value,
         Ron_sp_mohm_mm2=dev_ui["ron_sp"].value,
+        tox_nm=dev_ui["tox"].value,
     )

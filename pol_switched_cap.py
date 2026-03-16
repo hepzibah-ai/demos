@@ -186,9 +186,9 @@ def _(device_sliders, mo):
     dev_ui = device_sliders(mo)
     mo.vstack([
         mo.md("### Device Technology"),
-        mo.hstack([dev_ui["lg"], dev_ui["mobility_pct"]], justify="start"),
+        mo.hstack([dev_ui["lg"], dev_ui["tox"]], justify="start"),
         mo.hstack([dev_ui["vgs"], dev_ui["vth"]], justify="start"),
-        dev_ui["ron_sp"],
+        mo.hstack([dev_ui["mobility_pct"], dev_ui["ron_sp"]], justify="start"),
     ])
     return (dev_ui,)
 
