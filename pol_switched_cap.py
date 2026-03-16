@@ -18,6 +18,7 @@ def _():
         device_sliders, device_from_sliders,
     )
     return (
+        Path,
         device_from_sliders,
         device_sliders,
         device_summary_md,
@@ -139,8 +140,9 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.image(src="figures/flying_capacitor.png")
+def _(mo, Path):
+    _here = Path(__file__).resolve().parent
+    mo.image(src=str(_here / "figures" / "flying_capacitor.png"))
     return
 
 
