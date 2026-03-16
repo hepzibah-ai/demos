@@ -443,9 +443,12 @@ def _(mo):
         PCA isn't just a math tool — it's how science discovers latent
         structure.
 
-        In psychology, researchers gave thousands of people hundreds of
-        personality questions. PCA on the response matrix found that
-        five dimensions explain most of the variance:
+        In 1990, Lewis Goldberg applied factor analysis (a rotated
+        variant of PCA) to self-ratings by **1,710 subjects** on
+        **339 personality adjectives**. Five factors emerged as stable
+        across samples — the same five that Tupes & Christal had found
+        in 1961 on Air Force personnel data, but that had gone unnoticed
+        for decades:
 
         1. **Openness** (curiosity vs. caution)
         2. **Conscientiousness** (organized vs. spontaneous)
@@ -453,9 +456,18 @@ def _(mo):
         4. **Agreeableness** (cooperative vs. competitive)
         5. **Neuroticism** (sensitive vs. resilient)
 
-        Nobody designed these five traits. PCA discovered them — the same
-        way it discovered "abstract vs. concrete" and "natural vs.
-        manufactured" in GloVe above.
+        These names are **after-the-fact interpretations**. The math
+        produces five unnamed axes; researchers looked at which
+        adjectives loaded most strongly on each axis and chose a
+        label. "Openness" is not something the algorithm outputs — it's
+        a human reading of "this axis has *curious*, *creative*, and
+        *imaginative* at one end, and *cautious* and *conventional*
+        at the other."
+
+        This is exactly what we did in §2: PCA gave us unnamed axes,
+        and we interpreted "abstract, danger ← → landscape, living"
+        by looking at which word categories fell where. The axis is
+        real; the name is ours.
 
         The embedding analogy: each person is a point in
         "personality space." The raw space has hundreds of dimensions
@@ -466,6 +478,10 @@ def _(mo):
         GloVe-50d is the opposite case: 50 dimensions with no sharp
         low-rank structure. The training algorithm learned to use
         all of them.
+
+        *Goldberg, L.R. (1990). "An alternative 'description of personality':
+        The Big-Five factor structure." Journal of Personality and Social
+        Psychology, 59(6), 1216–1229.*
         """
     )
 
