@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# ngspice for live SPICE simulations
+RUN apt-get update && apt-get install -y --no-install-recommends ngspice \
+    && rm -rf /var/lib/apt/lists/*
+
 # Python deps
 RUN pip install --no-cache-dir \
     marimo \
@@ -24,6 +28,7 @@ RUN python -c "import gensim.downloader as api; \
 COPY *.py /app/notebooks/
 COPY data/ /app/notebooks/data/
 COPY figures/ /app/notebooks/figures/
+COPY spice/ /app/notebooks/spice/
 COPY deploy/server.py /app/deploy/server.py
 
 EXPOSE 8081

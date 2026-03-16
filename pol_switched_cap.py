@@ -17,6 +17,7 @@ def _():
         device_summary_md, gate_drive_loss,
         device_sliders, device_from_sliders,
     )
+    from spice_runner import run_balancer_normal, run_balancer_pump
     return (
         Path,
         device_from_sliders,
@@ -26,6 +27,8 @@ def _():
         mo,
         np,
         plt,
+        run_balancer_normal,
+        run_balancer_pump,
     )
 
 
@@ -200,16 +203,16 @@ def _(mo):
         start=1, stop=100, step=1, value=10,
         label="Flying capacitor (nF)",
     )
-    ui_bal_area = mo.ui.slider(
-        start=0.001, stop=0.1, step=0.001, value=0.01,
-        label="Balancer total switch area (mm²)",
+    ui_w_sw = mo.ui.slider(
+        start=1, stop=100, step=1, value=10,
+        label="Switch width (µm)",
     )
     mo.vstack([
         mo.md("### Balancer Design"),
         mo.hstack([ui_fsw, ui_cfly], justify="start"),
-        ui_bal_area,
+        ui_w_sw,
     ])
-    return ui_bal_area, ui_cfly, ui_fsw
+    return ui_cfly, ui_fsw, ui_w_sw
 
 
 @app.cell
@@ -220,43 +223,36 @@ def _(dev_ui, device_from_sliders, device_summary_md, mo):
 
 
 # ===================================================================
-# Balancer analysis
+# Balancer analysis (analytical)
 # ===================================================================
 @app.cell
-def _(gate_drive_loss, np):
+def _(gate_drive_loss):
 
-    def balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, A_bal):
+    def balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, W_sw, L_sw):
         """Analyze both balancer modes.
 
-        Normal mode: 1:1 from battery into bottom segment.
-          - 2 switches in series, carrying Imis
-          - Vin drops to Vpe across switches (ratio eff = Vpe/Vin)
-
-        Pump mode: bottom → top charge shuttle.
-          - Phase 1: Cfly charges across bottom segment (Vpe)
-          - Phase 2: Cfly dumps into top segment
-          - 4 switches total, 2 in path at a time
-          - ΔV perturbation on top segment = Imis / (Cfly × fsw)
+        W_sw: switch width (m), L_sw: gate length (m).
+        Switch area per device = W × L. Total area depends on mode.
         """
         results = {}
 
         # --- Normal mode (1:1, battery to bottom segment) ---
-        _n_sw_normal = 2
-        _A_per_sw = A_bal / _n_sw_normal
-        _Ron_sw = dev.Ron_sp / _A_per_sw if _A_per_sw > 0 else float('inf')
-        _R_out = _n_sw_normal * _Ron_sw
+        _n_sw = 2
+        _A_sw_total = _n_sw * W_sw * L_sw  # total gate area
+        _Ron_sw = dev.Ron_sp / (W_sw * L_sw)
+        _R_out = _n_sw * _Ron_sw
 
         _eta_ratio = Vpe / Vin if Vin > 0 else 0
         _P_cond = Imis**2 * _R_out
-        _P_gate = gate_drive_loss(dev, A_bal, fsw)
+        _P_gate = gate_drive_loss(dev, _A_sw_total, fsw)
         _Pload = Vpe * Imis
         _eta = _Pload / (_Pload + _P_cond + _P_gate) * _eta_ratio if _Pload > 0 else 0
 
         results["normal"] = {
-            "description": "1:1 battery → bottom",
-            "n_sw": _n_sw_normal,
+            "n_sw": _n_sw,
             "Ron_sw": _Ron_sw,
             "R_out": _R_out,
+            "A_sw_total": _A_sw_total,
             "eta_ratio": _eta_ratio,
             "P_cond": _P_cond,
             "P_gate": _P_gate,
@@ -265,33 +261,28 @@ def _(gate_drive_loss, np):
         }
 
         # --- Pump mode (bottom → top charge shuttle) ---
-        _n_sw_pump = 4
-        _A_per_sw_pump = A_bal / _n_sw_pump
-        _Ron_sw_pump = dev.Ron_sp / _A_per_sw_pump if _A_per_sw_pump > 0 else float('inf')
-        _R_path = 2 * _Ron_sw_pump  # 2 switches in path at a time
+        _n_sw_p = 4
+        _A_sw_total_p = _n_sw_p * W_sw * L_sw
+        _Ron_sw_p = dev.Ron_sp / (W_sw * L_sw)
+        _R_path = 2 * _Ron_sw_p  # 2 switches in path at a time
 
-        # Charge transfer: Q = Cfly × Vpe per cycle (Cfly charges to Vpe)
-        # Max current: Imis_max = Cfly × Vpe × fsw (if Cfly fully charges)
-        # But limited by Ron: effective ΔV = Vpe - Imis × R_path
-        _Q_per_cycle = Cfly * Vpe  # ideal
-        _I_max_pump = _Q_per_cycle * fsw  # max deliverable current
+        _Q_per_cycle = Cfly * Vpe
+        _I_max_pump = _Q_per_cycle * fsw
         _delta_v = Imis / (Cfly * fsw) if Cfly * fsw > 0 else float('inf')
 
-        _P_cond_pump = Imis**2 * _R_path
-        _P_gate_pump = gate_drive_loss(dev, A_bal, fsw)
-        # Pump mode: moving charge within the string, no ratio loss
-        # (energy comes from the mismatch, not from a higher voltage)
-        _eta_pump = _Pload / (_Pload + _P_cond_pump + _P_gate_pump) if _Pload > 0 else 0
+        _P_cond_p = Imis**2 * _R_path
+        _P_gate_p = gate_drive_loss(dev, _A_sw_total_p, fsw)
+        _eta_p = _Pload / (_Pload + _P_cond_p + _P_gate_p) if _Pload > 0 else 0
 
         results["pump"] = {
-            "description": "bottom → top shuttle",
-            "n_sw": _n_sw_pump,
-            "Ron_sw": _Ron_sw_pump,
+            "n_sw": _n_sw_p,
+            "Ron_sw": _Ron_sw_p,
             "R_out": _R_path,
-            "eta_ratio": 1.0,  # no ratio loss in pump mode
-            "P_cond": _P_cond_pump,
-            "P_gate": _P_gate_pump,
-            "eta_total": _eta_pump,
+            "A_sw_total": _A_sw_total_p,
+            "eta_ratio": 1.0,
+            "P_cond": _P_cond_p,
+            "P_gate": _P_gate_p,
+            "eta_total": _eta_p,
             "Vdrop_sw": Imis * _R_path,
             "delta_v": _delta_v,
             "I_max_pump": _I_max_pump,
@@ -317,7 +308,7 @@ def _(mo):
 @app.cell
 def _(
     balancer_analysis, dev, mo,
-    ui_bal_area, ui_cfly, ui_fsw,
+    ui_cfly, ui_fsw, ui_w_sw,
     ui_iload, ui_mismatch, ui_vin, ui_vpe,
 ):
     Vin = ui_vin.value
@@ -325,10 +316,11 @@ def _(
     Imis = ui_iload.value * (ui_mismatch.value / 100)
     fsw = ui_fsw.value * 1e6
     Cfly = ui_cfly.value * 1e-9
-    A_bal = ui_bal_area.value * 1e-6  # mm² → m²
+    W_sw = ui_w_sw.value * 1e-6  # µm → m
+    L_sw = dev.Lg  # gate length from device model
     Pload_total = Vpe * ui_iload.value * 2  # both PEs
 
-    bal = balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, A_bal)
+    bal = balancer_analysis(dev, Vin, Vpe, Imis, fsw, Cfly, W_sw, L_sw)
     _n = bal["normal"]
     _p = bal["pump"]
 
@@ -340,9 +332,10 @@ def _(
     | **When** | Vmid too low | Vmid too high |
     | **Action** | Battery → bottom | Bottom → top |
     | Mismatch current | ±{Imis*1e3:.0f} mA | ±{Imis*1e3:.0f} mA |
-    | Switches in path | {_n['n_sw']} | {_p['n_sw']} (2 active) |
+    | Switches | {_n['n_sw']} × {ui_w_sw.value} µm | {_p['n_sw']} × {ui_w_sw.value} µm (2 active) |
     | Ron per switch | {_n['Ron_sw']*1e3:.1f} mΩ | {_p['Ron_sw']*1e3:.1f} mΩ |
     | Switch Vdrop | {_n['Vdrop_sw']*1e3:.1f} mV | {_p['Vdrop_sw']*1e3:.1f} mV |
+    | Total switch area | {_n['A_sw_total']*1e12:.0f} µm² | {_p['A_sw_total']*1e12:.0f} µm² |
     | | | |
     | Ratio efficiency | {_n['eta_ratio']*100:.0f}% (Vpe/Vin) | 100% (no ratio loss) |
     | Conduction loss | {_n['P_cond']*1e3:.2f} mW | {_p['P_cond']*1e3:.2f} mW |
@@ -362,14 +355,12 @@ def _(
     > This is acceptable — the wasted power is only
     > {Imis * (Vin - Vpe) * 1e3:.1f} mW (mismatch current × excess voltage).*
     """)
-    return A_bal, Cfly, Imis, Pload_total, Vin, Vpe, bal, fsw
+    return Cfly, Imis, L_sw, Pload_total, Vin, Vpe, W_sw, bal, fsw
 
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md("""
-    ### Loss Breakdown by Mode
-    """)
+    mo.md("### Loss Breakdown by Mode")
     return
 
 
@@ -379,7 +370,7 @@ def _(Imis, Vin, Vpe, bal, plt):
 
     _n = bal["normal"]
     _p = bal["pump"]
-    _P_ratio_n = Imis * (Vin - Vpe)  # power wasted in ratio loss
+    _P_ratio_n = Imis * (Vin - Vpe)
 
     # Normal mode
     _losses_n = [_P_ratio_n * 1e3, _n["P_cond"] * 1e3, _n["P_gate"] * 1e3]
@@ -410,67 +401,79 @@ def _(Imis, Vin, Vpe, bal, plt):
 
 
 # ===================================================================
-# Switch waveforms — normal mode (1:1)
+# SPICE switch waveforms — normal mode
 # ===================================================================
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Switch Waveforms
+    ## Switch Waveforms (SPICE)
 
-    Idealized Vds and Ids for each switch through several cycles.
-    These show what the transistors actually see — the key information
-    for device optimization.
+    Transient simulation using the
+    [ASU PTM 90nm](https://mec.umn.edu/ptm) BSIM4 NMOS model.
+    These are real transistor waveforms — not idealized square waves.
+
+    Adjust the **switch width** and **frequency** sliders above to see
+    how the device behaves under different sizing.
 
     ### Normal mode (1:1 from battery)
 
-    Two switches form a half-bridge, alternately connecting Cfly to
-    the battery (charge) and to the bottom segment (discharge).
+    Four switches form a full bridge. Phase 1 (S1, S3 on) charges Cfly
+    from the battery; phase 2 (S2, S4 on) discharges into the bottom
+    PE segment.
     """)
     return
 
 
 @app.cell
-def _(A_bal, Imis, Vin, Vpe, dev, fsw, np, plt):
-    _T = 1.0 / fsw
-    _t = np.arange(0, 3 * _T, _T / 200)
-    _n_sw = 2
-    _Ron = dev.Ron_sp / (A_bal / _n_sw)
+def _(Cfly, Vin, Vpe, dev_ui, np, plt, run_balancer_normal, ui_fsw, ui_w_sw):
+    _wf_n = run_balancer_normal(
+        Vbat=Vin,
+        Vpe=Vpe,
+        Vgs=dev_ui["vgs"].value,
+        W_um=ui_w_sw.value,
+        L_nm=dev_ui["lg"].value,
+        Cfly_nF=Cfly * 1e9,
+        fsw_MHz=ui_fsw.value,
+    )
+    _t = _wf_n["t_ns"]
 
-    _phase = ((_t % _T) >= _T / 2).astype(float)
-    _ph1 = _phase == 0  # charge from battery
-    _ph2 = _phase == 1  # discharge to bottom segment
+    _fig, _axes = plt.subplots(3, 1, figsize=(9, 6), sharex=True)
 
-    # S1: battery side — on in phase 1
-    _s1_vds = np.where(_ph1, Imis * _Ron, Vin - Vpe)
-    _s1_ids = np.where(_ph1, Imis, 0)
-    # S2: bottom segment side — on in phase 2
-    _s2_vds = np.where(_ph2, Imis * _Ron, Vpe)
-    _s2_ids = np.where(_ph2, Imis, 0)
+    # Cfly voltage
+    _axes[0].plot(_t, _wf_n["v_cfly"] * 1e3, color="#59a14f", linewidth=1.5)
+    _axes[0].set_ylabel("Vcfly (mV)")
+    _axes[0].set_title("Flying capacitor voltage", fontsize=9, loc="left")
+    _axes[0].grid(True, alpha=0.3)
 
-    _switches = [
-        ("S1 (battery side)", _s1_vds, _s1_ids),
-        ("S2 (bottom segment side)", _s2_vds, _s2_ids),
-    ]
+    # Node voltages
+    _axes[1].plot(_t, _wf_n["v_a"] * 1e3, label="Cfly+", linewidth=1.5)
+    _axes[1].plot(_t, _wf_n["v_b"] * 1e3, label="Cfly−", linewidth=1.5)
+    _axes[1].set_ylabel("Node (mV)")
+    _axes[1].set_title("Cfly node voltages", fontsize=9, loc="left")
+    _axes[1].legend(fontsize=8)
+    _axes[1].grid(True, alpha=0.3)
 
-    _fig, _axes = plt.subplots(2, 2, figsize=(9, 4), sharex=True)
-    _t_us = _t * 1e6
+    # Currents
+    _axes[2].plot(_t, _wf_n["i_bat_mA"], color="#e15759", label="Battery",
+                  linewidth=1.5)
+    _axes[2].plot(_t, _wf_n["i_load_mA"], color="#4e79a7", label="Load",
+                  linewidth=1.5)
+    _axes[2].set_ylabel("Current (mA)")
+    _axes[2].set_xlabel("Time (ns)")
+    _axes[2].set_title("Supply currents", fontsize=9, loc="left")
+    _axes[2].legend(fontsize=8)
+    _axes[2].grid(True, alpha=0.3)
 
-    for _i, (_name, _vds, _ids) in enumerate(_switches):
-        _axes[_i, 0].plot(_t_us, _vds * 1e3, color="#e15759", linewidth=1.5)
-        _axes[_i, 0].set_ylabel("Vds (mV)")
-        _axes[_i, 0].set_title(_name, fontsize=9, loc="left")
-        _axes[_i, 0].grid(True, alpha=0.3)
+    # Compute average currents from steady-state portion
+    _mid = len(_t) // 2
+    _i_bat_avg = np.mean(_wf_n["i_bat_mA"][_mid:])
+    _i_load_avg = np.mean(_wf_n["i_load_mA"][_mid:])
 
-        _axes[_i, 1].plot(_t_us, _ids * 1e3, color="#4e79a7", linewidth=1.5)
-        _axes[_i, 1].set_ylabel("Ids (mA)")
-        _axes[_i, 1].grid(True, alpha=0.3)
-
-    _axes[-1, 0].set_xlabel("Time (µs)")
-    _axes[-1, 1].set_xlabel("Time (µs)")
     _fig.suptitle(
-        f"Normal mode: 1:1, Vin={Vin:.1f}V → {Vpe:.2f}V, "
-        f"{Imis*1e3:.0f}mA, {fsw/1e6:.0f}MHz",
-        fontsize=10,
+        f"Normal mode SPICE: W={ui_w_sw.value}µm, L={dev_ui['lg'].value}nm, "
+        f"Vin={Vin:.1f}V, {ui_fsw.value}MHz  |  "
+        f"Ibat,avg={_i_bat_avg:.2f}mA, Iload,avg={_i_load_avg:.2f}mA",
+        fontsize=9,
     )
     _fig.tight_layout()
     _fig
@@ -478,73 +481,68 @@ def _(A_bal, Imis, Vin, Vpe, dev, fsw, np, plt):
 
 
 # ===================================================================
-# Switch waveforms — pump mode
+# SPICE switch waveforms — pump mode
 # ===================================================================
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ### Pump mode (bottom → top)
 
-    Four switches reconfigure Cfly between the bottom segment (charge)
-    and top segment (discharge). Only the mismatch current flows.
-
-    - **Phase 1**: S1, S2 on — Cfly charges across bottom segment (Vmid → GND)
-    - **Phase 2**: S3, S4 on — Cfly dumps into top segment (Vstring → Vmid)
+    Phase 1 (S1, S2 on): Cfly charges across the bottom PE segment
+    (Vmid → GND). Phase 2 (S3, S4 on): Cfly dumps charge into the
+    top segment (Vstring → Vmid).
     """)
     return
 
 
 @app.cell
-def _(A_bal, Imis, Vpe, dev, fsw, np, plt):
-    _T = 1.0 / fsw
-    _t = np.arange(0, 3 * _T, _T / 200)
-    _n_sw = 4
-    _Ron = dev.Ron_sp / (A_bal / _n_sw)
+def _(Cfly, Vpe, dev_ui, np, plt, run_balancer_pump, ui_fsw, ui_w_sw):
+    _wf_p = run_balancer_pump(
+        Vpe=Vpe,
+        Vgs=dev_ui["vgs"].value,
+        W_um=ui_w_sw.value,
+        L_nm=dev_ui["lg"].value,
+        Cfly_nF=Cfly * 1e9,
+        fsw_MHz=ui_fsw.value,
+    )
+    _t = _wf_p["t_ns"]
 
-    _phase = ((_t % _T) >= _T / 2).astype(float)
-    _ph1 = _phase == 0  # charge across bottom
-    _ph2 = _phase == 1  # dump to top
+    _fig, _axes = plt.subplots(3, 1, figsize=(9, 6), sharex=True)
 
-    # In pump mode, voltages across each switch when off are ~Vpe
-    # S1: Vmid-side of bottom — on in phase 1
-    _s1_vds = np.where(_ph1, Imis * _Ron, Vpe)
-    _s1_ids = np.where(_ph1, Imis, 0)
-    # S2: GND-side of bottom — on in phase 1
-    _s2_vds = np.where(_ph1, Imis * _Ron, Vpe)
-    _s2_ids = np.where(_ph1, Imis, 0)
-    # S3: Vstring-side of top — on in phase 2
-    _s3_vds = np.where(_ph2, Imis * _Ron, Vpe)
-    _s3_ids = np.where(_ph2, Imis, 0)
-    # S4: Vmid-side of top — on in phase 2
-    _s4_vds = np.where(_ph2, Imis * _Ron, Vpe)
-    _s4_ids = np.where(_ph2, Imis, 0)
+    # Cfly voltage
+    _axes[0].plot(_t, _wf_p["v_cfly"] * 1e3, color="#59a14f", linewidth=1.5)
+    _axes[0].set_ylabel("Vcfly (mV)")
+    _axes[0].set_title("Flying capacitor voltage", fontsize=9, loc="left")
+    _axes[0].grid(True, alpha=0.3)
 
-    _switches = [
-        ("S1 (Vmid → Cfly+)", _s1_vds, _s1_ids),
-        ("S2 (Cfly− → GND)", _s2_vds, _s2_ids),
-        ("S3 (Vstring → Cfly+)", _s3_vds, _s3_ids),
-        ("S4 (Cfly− → Vmid)", _s4_vds, _s4_ids),
-    ]
+    # Node voltages
+    _axes[1].plot(_t, _wf_p["v_a"] * 1e3, label="Cfly+", linewidth=1.5)
+    _axes[1].plot(_t, _wf_p["v_b"] * 1e3, label="Cfly−", linewidth=1.5)
+    _axes[1].set_ylabel("Node (mV)")
+    _axes[1].set_title("Cfly node voltages", fontsize=9, loc="left")
+    _axes[1].legend(fontsize=8)
+    _axes[1].grid(True, alpha=0.3)
 
-    _fig, _axes = plt.subplots(4, 2, figsize=(9, 7), sharex=True)
-    _t_us = _t * 1e6
+    # Currents
+    _axes[2].plot(_t, _wf_p["i_top_mA"], color="#e15759", label="Top segment",
+                  linewidth=1.5)
+    _axes[2].plot(_t, _wf_p["i_bot_mA"], color="#4e79a7", label="Bottom segment",
+                  linewidth=1.5)
+    _axes[2].set_ylabel("Current (mA)")
+    _axes[2].set_xlabel("Time (ns)")
+    _axes[2].set_title("Segment currents", fontsize=9, loc="left")
+    _axes[2].legend(fontsize=8)
+    _axes[2].grid(True, alpha=0.3)
 
-    for _i, (_name, _vds, _ids) in enumerate(_switches):
-        _axes[_i, 0].plot(_t_us, _vds * 1e3, color="#e15759", linewidth=1.5)
-        _axes[_i, 0].set_ylabel("Vds (mV)")
-        _axes[_i, 0].set_title(_name, fontsize=9, loc="left")
-        _axes[_i, 0].grid(True, alpha=0.3)
+    _mid = len(_t) // 2
+    _i_top_avg = np.mean(_wf_p["i_top_mA"][_mid:])
+    _i_bot_avg = np.mean(_wf_p["i_bot_mA"][_mid:])
 
-        _axes[_i, 1].plot(_t_us, _ids * 1e3, color="#4e79a7", linewidth=1.5)
-        _axes[_i, 1].set_ylabel("Ids (mA)")
-        _axes[_i, 1].grid(True, alpha=0.3)
-
-    _axes[-1, 0].set_xlabel("Time (µs)")
-    _axes[-1, 1].set_xlabel("Time (µs)")
     _fig.suptitle(
-        f"Pump mode: bottom→top, Vpe={Vpe:.2f}V, "
-        f"{Imis*1e3:.0f}mA, {fsw/1e6:.0f}MHz",
-        fontsize=10,
+        f"Pump mode SPICE: W={ui_w_sw.value}µm, L={dev_ui['lg'].value}nm, "
+        f"Vpe={Vpe:.2f}V, {ui_fsw.value}MHz  |  "
+        f"Itop,avg={_i_top_avg:.2f}mA, Ibot,avg={_i_bot_avg:.2f}mA",
+        fontsize=9,
     )
     _fig.tight_layout()
     _fig
@@ -555,19 +553,19 @@ def _(A_bal, Imis, Vpe, dev, fsw, np, plt):
 # Switch stress summary
 # ===================================================================
 @app.cell(hide_code=True)
-def _(A_bal, Imis, Vin, Vpe, dev, mo):
-    _Ron_2 = dev.Ron_sp / (A_bal / 2)   # normal mode: 2 switches
-    _Ron_4 = dev.Ron_sp / (A_bal / 4)   # pump mode: 4 switches
+def _(Imis, Vin, Vpe, bal, mo, ui_w_sw):
+    _n = bal["normal"]
+    _p = bal["pump"]
 
     mo.md(f"""
     ### Switch Stress Summary
 
-    | | Normal mode (2 switches) | Pump mode (4 switches) |
+    | | Normal mode ({_n['n_sw']} × {ui_w_sw.value} µm) | Pump mode ({_p['n_sw']} × {ui_w_sw.value} µm) |
     |---|---|---|
     | Max off-state Vds | {(Vin - Vpe)*1e3:.0f} mV | {Vpe*1e3:.0f} mV |
     | On-state current | {Imis*1e3:.0f} mA | {Imis*1e3:.0f} mA |
-    | On-state Vds | {Imis*_Ron_2*1e3:.1f} mV | {Imis*_Ron_4*1e3:.1f} mV |
-    | Ron per switch | {_Ron_2*1e3:.1f} mΩ | {_Ron_4*1e3:.1f} mΩ |
+    | On-state Vds | {_n['Vdrop_sw']*1e3:.1f} mV | {_p['Vdrop_sw']*1e3:.1f} mV |
+    | Ron per switch | {_n['Ron_sw']*1e3:.1f} mΩ | {_p['Ron_sw']*1e3:.1f} mΩ |
 
     All voltages well below 1 V — no breakdown concern.
     Normal-mode S1 needs **bootstrap gate drive** (source above ground).
@@ -584,13 +582,13 @@ def _(Imis, Pload_total, Vin, Vpe, bal, mo):
     _n = bal["normal"]
     _p = bal["pump"]
     _worst_loss = max(
-        _n["P_cond"] + _n["P_gate"] + Imis * (Vin - Vpe),  # normal includes ratio
+        _n["P_cond"] + _n["P_gate"] + Imis * (Vin - Vpe),
         _p["P_cond"] + _p["P_gate"],
     )
     _sys_impact_pct = _worst_loss / Pload_total * 100
 
     _bal_eta_ok = min(_n["eta_total"], _p["eta_total"]) * 100 >= 50
-    _sys_ok = _sys_impact_pct <= 5  # ≤5% system loss from balancer
+    _sys_ok = _sys_impact_pct <= 5
 
     def _badge(ok):
         return "PASS" if ok else "**FAIL**"
@@ -605,6 +603,19 @@ def _(Imis, Pload_total, Vin, Vpe, bal, mo):
 
     *The 50% balancer target is deliberately relaxed — at 10% mismatch
     current, even 50% efficiency only costs ~5% at the system level.*
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+
+    *Switch waveforms powered by [ngspice](https://ngspice.sourceforge.io/)
+    with [ASU Predictive Technology Models](https://mec.umn.edu/ptm) (90nm bulk BSIM4).
+    The PTM model is a reasonable proxy for device behavior — the partner
+    should substitute their own model for quantitative design.*
     """)
     return
 
