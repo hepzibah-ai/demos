@@ -25,7 +25,7 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) |
 | 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (beta) — shipped to Takis |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
-| 6 | — | PCA | — | Planned |
+| 6 | `pca_demo.py` | PCA | `/pca` | Deployed (alpha) |
 | 7 | — | Clustering | — | Planned |
 | TBD | — | How Were These Vectors Trained? | — | Placeholder |
 | TBD | — | Ideograms as Embeddings | — | Placeholder (essay?) |
@@ -109,26 +109,22 @@ open-weight) or private (sim0 — closer to hardware analysis).
 
 ---
 
-## Notebook 6: "PCA"
+## Notebook 6: "PCA" — deployed (alpha)
 
-### Sections:
-1. **Warm-up**: PCA on simple 2D → 1D (correlated scatter, find the line
-   of max variance). Maybe interactive rotation.
-2. **Curated word set**: ~20 words spanning 3 intuitive axes
-   (alive/inorganic, safe/dangerous, concrete/abstract). PCA discovers
-   axes. Test whether GloVe cooperates before committing to word set.
-3. **Explained variance**: bar chart of eigenvalues. First N components
-   capture X%.
-4. **One-liners connecting PCA/SVD/eigenvalues**:
-   - PCA = directions of maximum variance
-   - SVD of centered data gives PCA: right singular vectors = principal
-     components
-   - Singular values² / n = eigenvalues of covariance matrix = variance
-     per PC
-5. **Big Five personality traits**: "PCA on questionnaires discovered the
-   Big Five. What might PCA on embeddings discover?"
-6. **Connection to quantization**: if most variance in few dims, can
-   truncate AND quantize. Compound savings.
+7 sections as built:
+1. **2D warm-up**: rotatable correlated scatter, PCA finds the long axis.
+   Interactive rotation slider.
+2. **PCA on GloVe**: 40 curated words in 6 categories (living, objects,
+   danger, gentle, abstract, landscape). PC1 ≈ concrete/abstract, PC2 ≈
+   natural/manufactured, PC3 ≈ living/industrial. Two scatter plots
+   (PC1×PC2, PC1×PC3) with word labels and category colors.
+3. **Explained variance**: scree plot + cumulative variance on 5000 words.
+   No sharp elbow — GloVe uses all 50 dims. ~11 PCs for 50%, ~27 for 80%.
+4. **PCA = SVD = eigenvalues**: equivalence table, dot product connection.
+5. **Big Five analogy**: personality traits as PCA-discovered latent dims.
+6. **Truncation + quantization**: reconstruction error and cosine error
+   vs number of PCs kept. 30-dim × 8-bit = 6.7× compression.
+7. **References**: Pearson, Shlens tutorial, Big Five, 3Blue1Brown.
 
 ---
 

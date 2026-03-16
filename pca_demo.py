@@ -1,0 +1,557 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "marimo",
+#     "gensim",
+#     "numpy",
+#     "matplotlib",
+# ]
+# ///
+
+import marimo
+
+__generated_with = "0.19.9"
+app = marimo.App(width="medium")
+
+
+# ── §0  Title ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        # PCA — Finding Structure in High Dimensions
+
+        You've seen that [embeddings](../embedding) live in 50-dimensional
+        space, that [high-dimensional geometry](../high-dimensions) is
+        unintuitive, and that [low precision](../precision-energy) preserves
+        the structure. But 50 dimensions is still too many to *see*.
+
+        **PCA** (Principal Component Analysis) finds the directions that
+        matter most — the axes along which the data varies the most. It's
+        the simplest and most important dimensionality reduction tool, and
+        it's built entirely from the dot product.
+
+        ---
+        """
+    )
+
+
+# ── §1  Warm-up: PCA in 2D ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §1 — Warm-up: PCA in 2D
+
+        Before we touch embeddings, let's see PCA on the simplest possible
+        data: a correlated 2D scatter.
+
+        The data is stretched along a diagonal. PCA finds that direction
+        (the **first principal component**, PC1) and the perpendicular
+        direction (PC2). The slider rotates the data — watch how PCA
+        always finds the long axis.
+        """
+    )
+
+
+@app.cell
+def _(mo):
+    angle_slider = mo.ui.slider(
+        start=0, stop=180, step=5, value=35,
+        label="Rotation (degrees):",
+        full_width=True,
+    )
+    angle_slider
+    return (angle_slider,)
+
+
+@app.cell
+def _(angle_slider, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    _rng = _np.random.default_rng(42)
+    # Elongated blob
+    _raw = _rng.normal(size=(200, 2)) * [3.0, 0.8]
+
+    # Rotate by user angle
+    _theta = _np.radians(angle_slider.value)
+    _R = _np.array([[_np.cos(_theta), -_np.sin(_theta)],
+                     [_np.sin(_theta),  _np.cos(_theta)]])
+    _data = _raw @ _R.T
+
+    # PCA via SVD
+    _centered = _data - _data.mean(axis=0)
+    _U, _S, _Vt = _np.linalg.svd(_centered, full_matrices=False)
+    _pc1 = _Vt[0]  # first principal component direction
+    _pc2 = _Vt[1]
+    _var_ratio = _S**2 / (_S**2).sum()
+
+    _fig, _ax = _plt.subplots(figsize=(6, 6))
+    _ax.scatter(_data[:, 0], _data[:, 1], alpha=0.4, s=15, color="#78909C")
+    _mean = _data.mean(axis=0)
+
+    # Draw PC arrows
+    _scale = 3.0
+    _ax.annotate("", xy=_mean + _scale * _pc1, xytext=_mean,
+                 arrowprops=dict(arrowstyle="->", color="#E53935", lw=2.5))
+    _ax.annotate("", xy=_mean + _scale * _pc2, xytext=_mean,
+                 arrowprops=dict(arrowstyle="->", color="#1E88E5", lw=2.5))
+    _ax.text(*(_mean + _scale * _pc1 * 1.1), f"PC1 ({_var_ratio[0]:.0%})",
+             color="#E53935", fontsize=10, fontweight="bold")
+    _ax.text(*(_mean + _scale * _pc2 * 1.1), f"PC2 ({_var_ratio[1]:.0%})",
+             color="#1E88E5", fontsize=10, fontweight="bold")
+
+    _ax.set_aspect("equal")
+    _ax.set_xlim(-8, 8)
+    _ax.set_ylim(-8, 8)
+    _ax.axhline(0, color="#ddd", lw=0.5)
+    _ax.axvline(0, color="#ddd", lw=0.5)
+    _ax.set_title(f"PCA on rotated 2D data ({angle_slider.value}°)")
+    _ax.spines["top"].set_visible(False)
+    _ax.spines["right"].set_visible(False)
+
+    _buf = _io.BytesIO()
+    _fig.savefig(_buf, format="png", dpi=150)
+    _plt.close(_fig)
+    _buf.seek(0)
+
+    mo.vstack([
+        mo.image(_buf.read(), width=500),
+        mo.md(f"""
+PC1 captures **{_var_ratio[0]:.0%}** of the variance, PC2 captures
+**{_var_ratio[1]:.0%}**. No matter how you rotate the data, PCA finds
+the long axis — because it *is* the direction of maximum variance.
+
+Mathematically: PCA finds the eigenvectors of the covariance matrix,
+or equivalently, the right singular vectors of the centered data matrix.
+The singular values tell you how much variance each direction captures.
+"""),
+    ])
+
+
+# ── §2  PCA on GloVe embeddings ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §2 — PCA on real embeddings
+
+        Now the same idea on GloVe-50d. We pick a curated set of ~40 words
+        spanning several intuitive categories (living things, objects,
+        abstract concepts, natural features) and ask PCA to find the
+        dominant axes.
+
+        PCA doesn't know our categories. It finds whatever directions
+        capture the most variance. Let's see if they're interpretable.
+        """
+    )
+
+
+@app.cell
+def _(mo):
+    """Load GloVe model (shared across notebook)."""
+    import gensim.downloader as api
+    glove_model = api.load("glove-wiki-gigaword-50")
+    return (glove_model,)
+
+
+@app.cell
+def _(glove_model, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    # Curated word set
+    _word_groups = {
+        "living":    ["cat", "dog", "fish", "bird", "tree", "flower", "human", "baby"],
+        "objects":   ["rock", "steel", "glass", "computer", "building", "car", "diamond", "plastic"],
+        "danger":    ["sword", "gun", "fire", "poison", "war", "storm"],
+        "gentle":    ["pillow", "blanket", "garden", "music", "peace", "love"],
+        "abstract":  ["justice", "freedom", "truth", "beauty", "chaos", "time"],
+        "landscape": ["table", "hammer", "bread", "water", "mountain", "river"],
+    }
+    _group_colors = {
+        "living": "#43A047", "objects": "#78909C", "danger": "#E53935",
+        "gentle": "#7B1FA2", "abstract": "#1E88E5", "landscape": "#FF9800",
+    }
+    _words = []
+    _groups = []
+    for _g, _ws in _word_groups.items():
+        for _w in _ws:
+            _words.append(_w)
+            _groups.append(_g)
+
+    _vecs = _np.array([glove_model[w] for w in _words])
+    _centered = _vecs - _vecs.mean(axis=0)
+    _U, _S, _Vt = _np.linalg.svd(_centered, full_matrices=False)
+    _coords = _centered @ _Vt[:3].T
+    _var_explained = _S**2 / (_S**2).sum()
+
+    # 2D scatter: PC1 vs PC2
+    _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(13, 5.5),
+                                        constrained_layout=True)
+
+    for _g in _word_groups:
+        _mask = [i for i, g in enumerate(_groups) if g == _g]
+        _ax1.scatter(_coords[_mask, 0], _coords[_mask, 1],
+                     color=_group_colors[_g], s=40, label=_g, alpha=0.8)
+        for _i in _mask:
+            _ax1.annotate(_words[_i], (_coords[_i, 0], _coords[_i, 1]),
+                          fontsize=7, alpha=0.8,
+                          xytext=(3, 3), textcoords="offset points")
+
+    _ax1.set_xlabel(f"PC1 ({_var_explained[0]:.1%})", fontsize=10)
+    _ax1.set_ylabel(f"PC2 ({_var_explained[1]:.1%})", fontsize=10)
+    _ax1.set_title("GloVe-50d: first two principal components")
+    _ax1.legend(fontsize=8, loc="best")
+    _ax1.axhline(0, color="#ddd", lw=0.5)
+    _ax1.axvline(0, color="#ddd", lw=0.5)
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+
+    # PC1 vs PC3
+    for _g in _word_groups:
+        _mask = [i for i, g in enumerate(_groups) if g == _g]
+        _ax2.scatter(_coords[_mask, 0], _coords[_mask, 2],
+                     color=_group_colors[_g], s=40, label=_g, alpha=0.8)
+        for _i in _mask:
+            _ax2.annotate(_words[_i], (_coords[_i, 0], _coords[_i, 2]),
+                          fontsize=7, alpha=0.8,
+                          xytext=(3, 3), textcoords="offset points")
+
+    _ax2.set_xlabel(f"PC1 ({_var_explained[0]:.1%})", fontsize=10)
+    _ax2.set_ylabel(f"PC3 ({_var_explained[2]:.1%})", fontsize=10)
+    _ax2.set_title("PC1 vs PC3")
+    _ax2.axhline(0, color="#ddd", lw=0.5)
+    _ax2.axvline(0, color="#ddd", lw=0.5)
+    _ax2.spines["top"].set_visible(False)
+    _ax2.spines["right"].set_visible(False)
+
+    _buf = _io.BytesIO()
+    _fig.savefig(_buf, format="png", dpi=150)
+    _plt.close(_fig)
+    _buf.seek(0)
+
+    mo.vstack([
+        mo.image(_buf.read(), width=900),
+        mo.md(f"""
+**PC1** ({_var_explained[0]:.1%} of variance) roughly separates
+concrete/natural words (left) from abstract/societal words (right).
+**PC2** ({_var_explained[1]:.1%}) separates natural landscape (bottom)
+from manufactured objects (top). **PC3** ({_var_explained[2]:.1%})
+separates living/emotional (bottom) from built/industrial (top).
+
+None of these axes were designed — PCA discovered them from the
+co-occurrence statistics encoded in GloVe.
+"""),
+    ])
+
+
+# ── §3  Explained variance ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §3 — How many dimensions matter?
+
+        The explained variance tells us how much information each principal
+        component captures. If a few PCs explain most of the variance, the
+        data is effectively low-dimensional — even if it lives in 50-d
+        space.
+        """
+    )
+
+
+@app.cell
+def _(glove_model, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    # PCA on larger subset for robust eigenspectrum
+    _words = list(glove_model.key_to_index.keys())[:5000]
+    _vecs = _np.array([glove_model[w] for w in _words])
+    _centered = _vecs - _vecs.mean(axis=0)
+    _U, _S, _Vt = _np.linalg.svd(_centered, full_matrices=False)
+    _var = _S**2 / (_S**2).sum()
+    _cumvar = _np.cumsum(_var)
+
+    _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(12, 4.5),
+                                        constrained_layout=True)
+
+    # Left: individual explained variance (scree plot)
+    _ax1.bar(range(1, 51), _var, color="#1E88E5", alpha=0.8)
+    _ax1.set_xlabel("Principal component")
+    _ax1.set_ylabel("Fraction of variance")
+    _ax1.set_title("Scree plot — GloVe-50d (5000 words)")
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+
+    # Right: cumulative
+    _ax2.plot(range(1, 51), _cumvar, color="#E53935", lw=2.5, marker="o",
+              markersize=3)
+    _ax2.axhline(0.5, color="#999", ls="--", lw=1)
+    _ax2.axhline(0.8, color="#999", ls="--", lw=1)
+    _ax2.axhline(0.9, color="#999", ls="--", lw=1)
+    _ax2.text(51, 0.5, "50%", fontsize=8, va="center", color="#666")
+    _ax2.text(51, 0.8, "80%", fontsize=8, va="center", color="#666")
+    _ax2.text(51, 0.9, "90%", fontsize=8, va="center", color="#666")
+
+    # Mark key thresholds
+    for _thresh in [0.5, 0.8, 0.9]:
+        _k = int(_np.searchsorted(_cumvar, _thresh)) + 1
+        _ax2.plot(_k, _cumvar[_k-1], "o", color="#E53935", markersize=8)
+        _ax2.annotate(f"k={_k}", (_k, _cumvar[_k-1]),
+                      xytext=(5, -15), textcoords="offset points",
+                      fontsize=9, fontweight="bold")
+
+    _ax2.set_xlabel("Number of components")
+    _ax2.set_ylabel("Cumulative variance explained")
+    _ax2.set_title("Cumulative explained variance")
+    _ax2.set_ylim(0, 1.05)
+    _ax2.spines["top"].set_visible(False)
+    _ax2.spines["right"].set_visible(False)
+
+    _k50 = int(_np.searchsorted(_cumvar, 0.5)) + 1
+    _k80 = int(_np.searchsorted(_cumvar, 0.8)) + 1
+    _k90 = int(_np.searchsorted(_cumvar, 0.9)) + 1
+
+    _buf = _io.BytesIO()
+    _fig.savefig(_buf, format="png", dpi=150)
+    _plt.close(_fig)
+    _buf.seek(0)
+
+    mo.vstack([
+        mo.image(_buf.read(), width=900),
+        mo.md(f"""
+**No sharp elbow.** GloVe-50d uses its dimensions relatively evenly:
+you need **{_k50}** PCs for 50% of variance, **{_k80}** for 80%,
+**{_k90}** for 90%. There's no "the data is really 3-dimensional"
+moment — the embedding genuinely uses most of its 50 dimensions.
+
+This is what you'd expect from a well-trained embedding: the training
+process learns to pack as much information as possible into the
+available dimensions. Wasted dimensions would mean the model is
+over-provisioned.
+
+Compare this to many real-world datasets (images, sensor data) where
+2–5 PCs explain 90%+ of variance. Embeddings are *designed* to be
+information-dense.
+"""),
+    ])
+
+
+# ── §4  PCA = SVD = eigenvalues ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §4 — PCA, SVD, and eigenvalues
+
+        PCA is described in many ways. They're all the same thing:
+
+        | Statement | What it means |
+        |-----------|---------------|
+        | PCA finds directions of **maximum variance** | The first PC is the direction along which the data spreads the most |
+        | PCA = **eigenvectors of the covariance matrix** | Cov = XᵀX/(n−1). Its eigenvectors are the PCs, eigenvalues are the variances |
+        | PCA = **right singular vectors of centered data** | If X = UΣVᵀ, the columns of V are the PCs |
+        | **Singular values² / n ≈ eigenvalues** of the covariance matrix | σᵢ² / (n−1) = λᵢ = variance along PCi |
+
+        The SVD formulation is how PCA is actually computed — it's
+        numerically stabler than forming XᵀX explicitly.
+
+        The connection to the **dot product**: each PC is the direction
+        that maximizes **vᵀXᵀXv** subject to ‖v‖=1. The covariance
+        matrix XᵀX is *all pairwise dot products* of the feature
+        columns. PCA is finding the directions where these dot products
+        are largest — the directions of maximum shared signal.
+        """
+    )
+
+
+# ── §5  The Big Five analogy ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §5 — PCA in the wild: the Big Five
+
+        PCA isn't just a math tool — it's how science discovers latent
+        structure.
+
+        In psychology, researchers gave thousands of people hundreds of
+        personality questions. PCA on the response matrix found that
+        five dimensions explain most of the variance:
+
+        1. **Openness** (curiosity vs. caution)
+        2. **Conscientiousness** (organized vs. spontaneous)
+        3. **Extraversion** (outgoing vs. reserved)
+        4. **Agreeableness** (cooperative vs. competitive)
+        5. **Neuroticism** (sensitive vs. resilient)
+
+        Nobody designed these five traits. PCA discovered them — the same
+        way it discovered "abstract vs. concrete" and "natural vs.
+        manufactured" in GloVe above.
+
+        The embedding analogy: each person is a point in
+        "personality space." The raw space has hundreds of dimensions
+        (one per question). PCA reveals that it's effectively
+        5-dimensional — the questions are correlated, and the
+        correlations cluster into five groups.
+
+        GloVe-50d is the opposite case: 50 dimensions with no sharp
+        low-rank structure. The training algorithm learned to use
+        all of them.
+        """
+    )
+
+
+# ── §6  Reconstruction and compression ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## §6 — Truncation and quantization: compound savings
+
+        If PCA reveals that most variance lives in a few dimensions, you
+        can **truncate** — keep only the top-k PCs and throw the rest
+        away. The reconstruction error is exactly the discarded variance.
+
+        For inference hardware, this compounds with **quantization**
+        (notebook 5): first reduce dimensions via PCA, then quantize
+        the remaining coordinates to low precision. Two independent
+        sources of compression, each preserving structure.
+        """
+    )
+
+
+@app.cell
+def _(glove_model, mo):
+    import numpy as _np
+    import matplotlib.pyplot as _plt
+    import io as _io
+
+    _words_sample = list(glove_model.key_to_index.keys())[:5000]
+    _vecs = _np.array([glove_model[w] for w in _words_sample])
+    _mean = _vecs.mean(axis=0)
+    _centered = _vecs - _mean
+    _U, _S, _Vt = _np.linalg.svd(_centered, full_matrices=False)
+
+    # Reconstruction error vs k
+    _ks = list(range(1, 51))
+    _rms_errors = []
+    for _k in _ks:
+        _recon = (_centered @ _Vt[:_k].T) @ _Vt[:_k] + _mean
+        _err = float(_np.sqrt(_np.mean((_vecs - _recon)**2)))
+        _rms_errors.append(_err)
+
+    # Also measure cosine preservation at each k
+    _rng = _np.random.default_rng(42)
+    _pairs = _rng.integers(0, len(_vecs), size=(500, 2))
+    _exact_cos = []
+    for _i, _j in _pairs:
+        _a, _b = _vecs[_i], _vecs[_j]
+        _exact_cos.append(float(_np.dot(_a, _b) / (_np.linalg.norm(_a) * _np.linalg.norm(_b))))
+    _exact_cos = _np.array(_exact_cos)
+
+    _cos_errors = []
+    for _k in _ks:
+        _recon = (_centered @ _Vt[:_k].T) @ _Vt[:_k] + _mean
+        _recon_cos = []
+        for _i, _j in _pairs:
+            _a, _b = _recon[_i], _recon[_j]
+            _n = _np.linalg.norm(_a) * _np.linalg.norm(_b)
+            _recon_cos.append(float(_np.dot(_a, _b) / _n) if _n > 0 else 0)
+        _cos_errors.append(float(_np.sqrt(_np.mean((_np.array(_recon_cos) - _exact_cos)**2))))
+
+    _fig, (_ax1, _ax2) = _plt.subplots(1, 2, figsize=(12, 4.5),
+                                        constrained_layout=True)
+
+    _ax1.plot(_ks, _rms_errors, color="#1E88E5", lw=2.5, marker="o", markersize=3)
+    _ax1.set_xlabel("Number of PCs kept")
+    _ax1.set_ylabel("RMS reconstruction error")
+    _ax1.set_title("Reconstruction error vs truncation")
+    _ax1.spines["top"].set_visible(False)
+    _ax1.spines["right"].set_visible(False)
+
+    _ax2.plot(_ks, _cos_errors, color="#E53935", lw=2.5, marker="o", markersize=3)
+    _ax2.set_xlabel("Number of PCs kept")
+    _ax2.set_ylabel("RMS cosine error")
+    _ax2.set_title("Cosine similarity error vs truncation")
+    _ax2.spines["top"].set_visible(False)
+    _ax2.spines["right"].set_visible(False)
+
+    _buf = _io.BytesIO()
+    _fig.savefig(_buf, format="png", dpi=150)
+    _plt.close(_fig)
+    _buf.seek(0)
+
+    mo.vstack([
+        mo.image(_buf.read(), width=900),
+        mo.md(f"""
+**Left**: RMS error in the embedding values as we discard PCs. At k=30
+(60% of dimensions), the error is still modest. At k=10 it's noticeable.
+
+**Right**: what matters for similarity search — the error in **cosine
+similarity** between word pairs. Cosine is more robust to truncation
+than raw reconstruction, because it normalizes out the lost magnitude.
+At k=30, pairwise cosines are preserved to ~{_cos_errors[29]:.4f} RMS
+error.
+
+For comparison, the quantization noise from E4M3 (notebook 5) is
+~0.004 on cosine. PCA truncation to 30 dims adds comparable error —
+but saves 40% of the memory and compute. Stack both: 30-dim × 8-bit
+instead of 50-dim × 32-bit = **6.7× compression** with minimal
+quality loss.
+"""),
+    ])
+
+
+# ── §7  References ──
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ---
+
+        **Next**: [Clustering and Search](../clustering) — finding groups
+        in the embedding space, and searching it efficiently.
+
+        **References**:
+        [Pearson 1901 (PCA origin)](https://en.wikipedia.org/wiki/Principal_component_analysis#History) •
+        [Shlens, "A Tutorial on PCA"](https://arxiv.org/abs/1404.1100) •
+        [Goldberg & Levy 2014 "word2vec Explained"](https://arxiv.org/abs/1402.3722) •
+        [Big Five personality traits](https://en.wikipedia.org/wiki/Big_Five_personality_traits) •
+        [3Blue1Brown "Eigenvectors and eigenvalues"](https://www.3blue1brown.com/lessons/eigenvalues)
+        """
+    )
+
+
+# ── boilerplate ──
+
+@app.cell
+def _():
+    import marimo as mo
+    return (mo,)
+
+
+if __name__ == "__main__":
+    app.run()
