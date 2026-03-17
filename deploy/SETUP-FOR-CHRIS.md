@@ -20,7 +20,7 @@ There are currently two repos that need serving:
 
 | Repo | What | Notebooks | Audience |
 |------|------|-----------|----------|
-| `demos` | Math/ML tutorial series (tokenizer, embeddings, PCA, etc.) | 7 marimo notebooks | Everyone — onboarding, customer demos |
+| `demos` | Math/ML tutorial series (tokenizer, embeddings, PCA, etc.) | 8 marimo notebooks | Everyone — onboarding, customer demos |
 | `sim0/tutorials` | Chip architecture walkthroughs | TBD (will migrate to marimo) | Engineering team |
 
 Both are pure Python — no GPUs, no CUDA, no heavy compute. The
@@ -134,6 +134,7 @@ All served from a single container on port 8081:
 | `/high-dimensions` | High Dimensions | Curse of dimensionality, concentration |
 | `/precision-energy` | Precision and Energy | Number formats, MAC energy, custom silicon |
 | `/pca` | PCA | Dimensionality reduction on embeddings |
+| `/clustering` | Clustering & Search | k-means, t-SNE, IVF, LSH, HNSW |
 | `/pol-sc` | Switched Capacitor | SPICE simulation (engineering) |
 
 New notebooks get added roughly weekly. Adding one is a code change

@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir \
     numpy \
     matplotlib \
     plotly \
+    scikit-learn \
     fastapi \
     uvicorn
 

@@ -18,6 +18,7 @@ server = (
     .with_app(path="/precision-energy", root="/app/notebooks/precision_energy_demo.py")
     .with_app(path="/pol-sc", root="/app/notebooks/pol_switched_cap.py")
     .with_app(path="/pca", root="/app/notebooks/pca_demo.py")
+    .with_app(path="/clustering", root="/app/notebooks/clustering_demo.py")
 )
 
 app = FastAPI()
