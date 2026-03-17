@@ -8,10 +8,12 @@ This is the main planning file for the demo notebook series.
 
 ## Deployment
 
-Linode 172.105.0.10:8081 via Docker Compose. Server config in `deploy/`.
-To deploy changes: `ssh 172.105.0.10 "cd ~/demos && git pull && docker-compose -f deploy/docker-compose.yml up -d --build"`
+Currently: Linode 172.105.0.10:8081 via Docker Compose.
+**Migrating to corporate servers** — briefing sent to Chris (2026-03-16),
+see `deploy/SETUP-FOR-CHRIS.md`.
 
-Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
+Deploy command (same on either host):
+`cd ~/demos && git pull && docker-compose -f deploy/docker-compose.yml up -d --build`
 
 ---
 
@@ -25,7 +27,7 @@ Pending: HTTPS via Caddy + DNS for `tutorials.hepzibah.ai` (Chris).
 | 4 | `high_dimensions_demo.py` | High Dimensions | `/high-dimensions` | Deployed (beta) |
 | 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (beta) — shipped to Takis |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
-| 6 | `pca_demo.py` | PCA | `/pca` | Deployed (alpha) |
+| 6 | `pca_demo.py` | PCA | `/pca` | Deployed (beta) |
 | 7 | — | Clustering | — | Planned |
 | TBD | — | How Were These Vectors Trained? | — | Placeholder |
 | TBD | — | Ideograms as Embeddings | — | Placeholder (essay?) |
@@ -109,22 +111,32 @@ open-weight) or private (sim0 — closer to hardware analysis).
 
 ---
 
-## Notebook 6: "PCA" — deployed (alpha)
+## Notebook 6: "PCA" — shipped (beta)
 
 7 sections as built:
-1. **2D warm-up**: rotatable correlated scatter, PCA finds the long axis.
-   Interactive rotation slider.
-2. **PCA on GloVe**: 40 curated words in 6 categories (living, objects,
-   danger, gentle, abstract, landscape). PC1 ≈ concrete/abstract, PC2 ≈
-   natural/manufactured, PC3 ≈ living/industrial. Two scatter plots
-   (PC1×PC2, PC1×PC3) with word labels and category colors.
+1. **2D warm-up**: rotatable correlated scatter with code snippet and
+   expected PC2 = 6.6% derivation.
+2. **PCA on GloVe**: 40 curated words in 6 categories. Dynamic PC axis
+   descriptions (computed from category centroids, not hardcoded).
+   Co-occurrence dot product table (king·his vs king·her etc.) with
+   10-word sliding window explanation.
 3. **Explained variance**: scree plot + cumulative variance on 5000 words.
    No sharp elbow — GloVe uses all 50 dims. ~11 PCs for 50%, ~27 for 80%.
 4. **PCA = SVD = eigenvalues**: equivalence table, dot product connection.
-5. **Big Five analogy**: personality traits as PCA-discovered latent dims.
+5. **Big Five analogy**: Goldberg 1990 (1,710 subjects, 339 adjectives).
+   Key point: names are after-the-fact interpretations, same as our §2
+   PC labels.
 6. **Truncation + quantization**: reconstruction error and cosine error
    vs number of PCs kept. 30-dim × 8-bit = 6.7× compression.
-7. **References**: Pearson, Shlens tutorial, Big Five, 3Blue1Brown.
+7. **References**: Pearson, Shlens tutorial, Goldberg 1990, 3Blue1Brown.
+
+### Bridge to h0-applications
+PCA raises the question: how do you *compute* SVD on custom silicon?
+This is a natural entry point for h0-applications work — showing that
+the same MAC array that does inference can also do iterative linear
+algebra (power method, Lanczos, randomized SVD). Not a demos notebook
+— belongs in sim0/tutorials where we can show the actual graph
+compilation.
 
 ---
 
