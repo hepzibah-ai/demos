@@ -28,7 +28,8 @@ Deploy command (same on either host):
 | 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (beta) — shipped to Takis |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | `pca_demo.py` | PCA | `/pca` | Deployed (beta) |
-| 7 | — | Clustering | — | Planned |
+| 7 | — | Clustering & Search | `/clustering` | Building |
+| 8 | — | RAG: From Search to Answers | `/rag` | Planned |
 | TBD | — | How Were These Vectors Trained? | — | Placeholder |
 | TBD | — | Ideograms as Embeddings | — | Placeholder (essay?) |
 
@@ -140,32 +141,66 @@ compilation.
 
 ---
 
-## Notebook 7: "Clustering and Search"
+## Notebook 7: "Clustering and Search" — building
 
-Two sides of the same problem: finding structure (clustering) and finding
-one thing fast (search). Both are responses to the curse of dimensionality
-from notebook 4.
+Every section has a live interactive element (slider, toggle, text input).
+No passive textbook sections.
 
-### Clustering:
-- k-means on embeddings, color by cluster in 3D plotly
-- Elbow / silhouette — interactive slider for k
-- Hierarchical clustering — dendrogram
-- Maybe t-SNE/UMAP for "map of all words" (precompute on subset)
+### Sections:
+1. **Why search is hard**: text input for query word + slider for corpus
+   size (100→10K). Brute-force nearest neighbors with visible timing.
+   Shows linear scaling — motivates everything that follows.
+2. **k-means**: slider for k (2→20). PCA scatter recolors live, table
+   shows top-5 words per cluster. Elbow/silhouette plot — no magic k
+   in a continuous embedding space.
+3. **t-SNE vs PCA**: toggle between projections on same 1000-word subset.
+   PCA preserves global structure, t-SNE preserves local neighborhoods.
+   Precompute t-SNE during build. Needs scikit-learn dependency.
+4. **IVF (inverted file index)**: clustering as search accelerator.
+   Slider for nprobe (1→k). Scatter plot highlights searched cells.
+   Recall % and speedup vs brute force.
+5. **LSH (locality-sensitive hashing)**: slider for hash bits (4→64).
+   Each bit = sign(random_vector · query) — dot product again.
+   Recall vs selectivity tradeoff.
+6. **HNSW**: build small graph (50–100 nodes), animate greedy walk
+   from entry point to target. Slider for layers. Skip-list intuition.
+7. **Bridge to RAG**: bag-of-words retrieval on curated sentences
+   (average GloVe vectors). Text input for query. Honest about the
+   limitation — sets up notebook 8.
 
-### Vector search (approximate nearest neighbor):
-- Callback to notebook 4 §8: exact nearest-neighbor breaks down in high-D
-  (distance concentration). So how do vector databases actually work?
-- **LSH** (locality-sensitive hashing): random projections bucket similar
-  vectors together. The dot product shows up again — each hash is a
-  sign(random_vector · query).
-- **IVF** (inverted file index): cluster first (Voronoi cells), then only
-  search nearby clusters. Clustering as a search accelerator.
-- **HNSW** (hierarchical navigable small world): graph-based, greedy
-  traversal. Skip-list intuition.
-- Interactive: build a small index on GloVe, compare exact vs approximate
-  search — show recall/speed tradeoff with a slider for number of probes.
-- This is the bridge to RAG and production LLM systems: context
-  engineering starts with retrieval, retrieval starts with vector search.
+### Dependencies:
+- scikit-learn (t-SNE, k-means) — add to Dockerfile
+
+---
+
+## Notebook 8: "RAG — From Search to Answers" — planned
+
+The full retrieval-augmented generation loop. Notebook 7 §7 is the
+teaser; this is the real thing.
+
+### Sections (draft):
+1. **Word embeddings aren't enough**: bag-of-words loses word order,
+   can't capture "not good" vs "good". Need sentence/paragraph embeddings.
+2. **Sentence embeddings**: load a small model (all-MiniLM-L6-v2, 80MB,
+   CPU-only). Compare sentence similarity — show that it captures meaning
+   where bag-of-words fails.
+3. **Chunking**: same document, different chunk sizes. Show that chunk
+   size is a design choice (too small = no context, too big = dilutes).
+   Interactive slider for chunk size with retrieval quality metric.
+4. **The retrieval loop**: embed query → search index → top-k chunks.
+   Build a small FAISS/IVF index on chunked documents. Interactive query.
+5. **Retrieval + generation**: stuff retrieved chunks into a prompt.
+   Show the assembled prompt (and optionally call Claude API to complete).
+6. **What can go wrong**: retrieved chunk is irrelevant, chunk boundary
+   splits a key sentence, embedding model doesn't understand domain jargon.
+   Interactive examples of each failure mode.
+
+### Dependencies (heavy):
+- sentence-transformers → pulls PyTorch (~800MB). Container roughly
+  doubles. Keep out of Docker build until ready.
+- Optionally: anthropic SDK for live generation step.
+- Alternative: use a lighter embedding model (e.g. onnxruntime + quantized
+  MiniLM) to avoid PyTorch. Worth investigating.
 
 ---
 
