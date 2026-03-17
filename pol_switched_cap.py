@@ -17,6 +17,7 @@ def _():
         device_summary_md, device_sliders, device_from_sliders,
     )
     from spice_runner import run_balancer
+
     return (
         Path,
         device_from_sliders,
@@ -110,7 +111,10 @@ def _(mo):
     - **Capacitor** (Cpe) — represents ~0.5 mm² of well capacitance
       in 28nm at the PE operating voltage. This is the intrinsic
       decoupling the silicon gives you, per square millimeter.
-    - **Current source** — represents the PE's power consumption.
+    - **Current source** — represents the PE's DC power consumption.
+    - **Resistor** (Rpe) — Norton-equivalent load of the PE's
+      switched-capacitor compute activity. This damps the PE node
+      and models the continuous charge shuffling of operation.
 
     The simulation starts balanced (both PEs at Vpe, both drawing
     the same current). Then the bottom PE's current steps down,
@@ -131,7 +135,7 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo, Path):
+def _(Path, mo):
     _here = Path(__file__).resolve().parent
     mo.image(src=str(_here / "figures" / "flying_capacitor.png"))
     return
@@ -139,7 +143,9 @@ def _(mo, Path):
 
 @app.cell
 def _(mo):
-    mo.md("## Parameters")
+    mo.md("""
+    ## Parameters
+    """)
     return
 
 
@@ -195,6 +201,10 @@ def _(mo):
         start=0.1, stop=5.0, step=0.1, value=0.5,
         label="PE load capacitance (nF)",
     )
+    ui_rpe = mo.ui.slider(
+        start=1.0, stop=20.0, step=0.5, value=4.0,
+        label="PE Norton resistance (Ω)",
+    )
     ui_w_sw = mo.ui.slider(
         start=10, stop=1000, step=10, value=300,
         label="Switch width (µm)",
@@ -202,23 +212,21 @@ def _(mo):
     mo.vstack([
         mo.md("### Balancer Design"),
         mo.hstack([ui_fsw, ui_cfly], justify="start"),
-        mo.hstack([ui_cpe, ui_w_sw], justify="start"),
+        mo.hstack([ui_cpe, ui_rpe], justify="start"),
+        ui_w_sw,
     ])
-    return ui_cfly, ui_cpe, ui_fsw, ui_w_sw
+    return ui_cfly, ui_cpe, ui_fsw, ui_rpe, ui_w_sw
 
 
 @app.cell
 def _(dev_ui, device_from_sliders, device_summary_md, mo):
     dev = device_from_sliders(dev_ui)
     mo.md(f"### Device Model\n\n{device_summary_md(dev)}")
-    return (dev,)
+    return
 
 
-# ===================================================================
-# Design point summary
-# ===================================================================
 @app.cell(hide_code=True)
-def _(dev_ui, mo, ui_cfly, ui_fsw, ui_w_sw):
+def _(dev_ui, mo, ui_cfly, ui_fsw, ui_vin, ui_w_sw):
     # Ron × Cfly time constant
     _W = ui_w_sw.value * 1e-6
     _L = dev_ui["lg"].value * 1e-9
@@ -227,6 +235,10 @@ def _(dev_ui, mo, ui_cfly, ui_fsw, ui_w_sw):
     _Cfly = ui_cfly.value * 1e-9
     _tau = _Ron * _Cfly
     _Thalf = 0.5 / (ui_fsw.value * 1e6)
+
+    _Vgs = dev_ui["vgs"].value
+    _Vth = dev_ui["vth"].value
+    _Vgs_eff_hi = _Vgs - ui_vin.value  # worst-case high-side Vgs
 
     mo.md(f"""
     ### Design Point
@@ -239,13 +251,13 @@ def _(dev_ui, mo, ui_cfly, ui_fsw, ui_w_sw):
     | τ / T_half | {_tau/_Thalf*100:.0f}% | Want ≪ 100% |
     | Cfly charge/cycle | {_Cfly * 0.4 * 1e12:.0f} pC | At Vpe = 0.4V |
     | Max Imis at 100mV error | {_Cfly * 0.1 * ui_fsw.value * 1e6 * 1e3:.0f} mA | Cfly × Verror × fsw |
+    | | | |
+    | Gate drive (Vgs) | {_Vgs:.1f} V | {"⚠️ Need bootstrap" if _Vgs < ui_vin.value + _Vth else "OK"} |
+    | High-side Vgs,eff | {_Vgs_eff_hi:.2f} V | Vgs − Vbat; need > Vth ({_Vth:.2f}V) |
     """)
     return
 
 
-# ===================================================================
-# SPICE simulation
-# ===================================================================
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -261,8 +273,19 @@ def _(mo):
 
 @app.cell
 def _(
-    dev_ui, np, plt, run_balancer,
-    ui_cfly, ui_cpe, ui_fsw, ui_imismatch, ui_istring, ui_vin, ui_vpe, ui_w_sw,
+    dev_ui,
+    np,
+    plt,
+    run_balancer,
+    ui_cfly,
+    ui_cpe,
+    ui_fsw,
+    ui_imismatch,
+    ui_istring,
+    ui_rpe,
+    ui_vin,
+    ui_vpe,
+    ui_w_sw,
 ):
     _wf = run_balancer(
         Vbat=ui_vin.value,
@@ -272,6 +295,7 @@ def _(
         L_nm=dev_ui["lg"].value,
         Cfly_nF=ui_cfly.value,
         Cpe_nF=ui_cpe.value,
+        Rpe_ohm=ui_rpe.value,
         Istring_mA=ui_istring.value,
         Imismatch_mA=ui_imismatch.value,
         fsw_MHz=ui_fsw.value,
@@ -320,9 +344,6 @@ def _(
     return
 
 
-# ===================================================================
-# Discussion
-# ===================================================================
 @app.cell(hide_code=True)
 def _(mo, ui_cfly, ui_fsw, ui_vpe):
     _Verror = ui_vpe.value  # worst case: full Vpe

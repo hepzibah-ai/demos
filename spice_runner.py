@@ -45,11 +45,12 @@ def _run_ngspice(deck: str, workdir: str) -> str:
 def run_balancer(
     Vbat: float = 1.2,
     Vpe: float = 0.4,
-    Vgs: float = 0.9,
+    Vgs: float = 1.5,
     W_um: float = 300.0,
     L_nm: float = 90,
     Cfly_nF: float = 1.0,
     Cpe_nF: float = 0.5,
+    Rpe_ohm: float = 4.0,
     Istring_mA: float = 100.0,
     Imismatch_mA: float = 10.0,
     fsw_MHz: float = 100.0,
@@ -57,16 +58,20 @@ def run_balancer(
 ) -> dict:
     """Simulate 1:1 SC balancer with physical PE loads.
 
-    Each PE is modeled as a capacitor (Cpe, representing ~0.5mm² of
-    well capacitance in 28nm at Vpe) with initial voltage Vpe, plus a
-    parallel current source representing PE power consumption.
+    Each PE is modeled as:
+    - Capacitor (Cpe): ~0.5mm² of well capacitance in 28nm at Vpe
+    - Current source: PE power consumption (Istring)
+    - Resistor (Rpe): Norton-equivalent switched-capacitor compute
+      load — models the continuous charge shuffling of PE operation
 
     The simulation starts balanced (both PEs at Vpe, both drawing
     Istring). After 1/4 of the simulation, the bottom PE current steps
     down by Imismatch (bottom draws less → Vmid rises → balancer should
     act).
 
-    Switch width default (300µm) is sized for Ron×Cfly ≈ 1ns.
+    Vgs default (1.5V) provides enough overdrive for high-side NMOS
+    switches (need Vgs > Vbat + Vth for full conduction). In practice
+    this requires a bootstrap or charge-pump gate driver.
 
     Returns dict with numpy arrays.
     """
@@ -92,14 +97,17 @@ def run_balancer(
 * === Battery (ideal — represents string supply output) ===
 Vbat vstring 0 DC {Vbat}
 
-* === Top PE: C + I from vstring to vmid ===
+* === Top PE: C + I + R from vstring to vmid ===
+* C = well capacitance, I = DC load, R = Norton-equivalent compute load
 Cpe_top vstring vmid {Cpe_nF}n IC={Vpe}
 Ipe_top vmid vstring DC {Istring_mA}m
+Rpe_top vstring vmid {Rpe_ohm}
 
-* === Bottom PE: C + I from vmid to GND ===
+* === Bottom PE: C + I + R from vmid to GND ===
 * Current steps down at t={step_time}: {Istring_mA}mA → {I_bot_after}mA
 Cpe_bot vmid 0 {Cpe_nF}n IC={Vpe}
 Ipe_bot 0 vmid PWL(0 {Istring_mA}m {step_time} {Istring_mA}m {step_time + 1e-12} {I_bot_after}m)
+Rpe_bot vmid 0 {Rpe_ohm}
 
 * === Flying capacitor ===
 Cfly cfly_p cfly_n {Cfly_nF}n

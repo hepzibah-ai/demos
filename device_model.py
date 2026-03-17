@@ -45,7 +45,7 @@ class DeviceModel:
 def compute_device(
     Lg_nm: float = 90,
     mobility_pct: float = 100,
-    Vgs: float = 0.9,
+    Vgs: float = 1.5,
     Vth: float = 0.40,
     Ron_sp_mohm_mm2: float = 0.03,
     tox_nm: float = 2.05,
@@ -146,7 +146,7 @@ def device_sliders(mo):
             label="Mobility (% of bulk Si, ~480 cm²/V·s)",
         ),
         "vgs": mo.ui.slider(
-            start=0.5, stop=1.2, step=0.05, value=0.9,
+            start=0.5, stop=3.0, step=0.05, value=1.5,
             label="Gate drive voltage (V)",
         ),
         "vth": mo.ui.slider(
