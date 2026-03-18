@@ -28,7 +28,7 @@ Deploy command (same on either host):
 | 5 | `precision_energy_demo.py` | Precision and Energy | `/precision-energy` | Deployed (beta) — shipped to Takis |
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | `pca_demo.py` | PCA | `/pca` | Deployed (beta) |
-| 7 | `clustering_demo.py` | Clustering & Search | `/clustering` | Ready to deploy |
+| 7 | `clustering_demo.py` | Clustering & Search | `/clustering` | Deployed (beta) — shipped to Takis |
 | 8 | — | RAG: From Search to Answers | `/rag` | Planned |
 | TBD | — | How Were These Vectors Trained? | — | Placeholder |
 | TBD | — | Ideograms as Embeddings | — | Placeholder (essay?) |
