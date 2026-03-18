@@ -434,10 +434,22 @@ def _(mo):
         Here's the key insight: **clustering isn't just for analysis —
         it's a search strategy.**
 
-        Build an index by clustering the database (Voronoi cells). At
-        query time, find the nearest centroid(s), then search only those
-        cells. This is **IVF** (Inverted File Index) — the backbone of
-        most production vector databases.
+        **Building the index**: run k-means on the entire database to
+        produce √N to 4√N centroids (e.g. ~1,000–4,000 for a
+        million-vector database). Each vector is assigned to its nearest
+        centroid, creating **Voronoi cells** — regions of space "owned"
+        by each centroid. Store an inverted list per cell: centroid →
+        list of vectors in that cell.
+
+        **Searching**: given a query, compute its distance to all
+        centroids (cheap — there are only √N of them), pick the
+        **nprobe** nearest, and brute-force search only those cells.
+        With nprobe=1 you search ~1/√N of the database; with larger
+        nprobe you trade speed for recall.
+
+        It's a flat partition — one level, not a tree. (Hierarchical
+        variants like IMI exist but flat IVF is the standard building
+        block in FAISS, Pinecone, Milvus, etc.)
         """
     )
 
