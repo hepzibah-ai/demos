@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir \
     matplotlib \
     plotly \
     scikit-learn \
+    onnxruntime \
     fastapi \
     uvicorn
 
@@ -24,6 +25,9 @@ RUN python -c "from huggingface_hub import hf_hub_download; \
     hf_hub_download('deepseek-ai/DeepSeek-V3', 'tokenizer.json')"
 RUN python -c "import gensim.downloader as api; \
     api.load('glove-wiki-gigaword-50')"
+RUN python -c "from huggingface_hub import hf_hub_download; \
+    hf_hub_download('sentence-transformers/all-MiniLM-L6-v2', 'onnx/model.onnx'); \
+    hf_hub_download('sentence-transformers/all-MiniLM-L6-v2', 'tokenizer.json')"
 
 # Copy notebooks, data, and server
 COPY *.py /app/notebooks/

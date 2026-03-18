@@ -29,7 +29,7 @@ Deploy command (same on either host):
 | 5a | — | Microscaling | — | Planned (deep-dive, may go to sim0) |
 | 6 | `pca_demo.py` | PCA | `/pca` | Deployed (beta) |
 | 7 | `clustering_demo.py` | Clustering & Search | `/clustering` | Deployed (beta) — shipped to Takis |
-| 8 | — | RAG: From Search to Answers | `/rag` | Planned |
+| 8 | `rag_demo.py` | RAG: From Search to Answers | `/rag` | Deployed (beta) |
 | TBD | — | How Were These Vectors Trained? | — | Placeholder |
 | TBD | — | Ideograms as Embeddings | — | Placeholder (essay?) |
 
@@ -173,34 +173,35 @@ No passive textbook sections.
 
 ---
 
-## Notebook 8: "RAG — From Search to Answers" — planned
+## Notebook 8: "RAG — From Search to Answers" — shipped (beta)
 
-The full retrieval-augmented generation loop. Notebook 7 §7 is the
-teaser; this is the real thing.
+6 sections as built:
+1. **Why word embeddings aren't enough**: interactive two-sentence
+   comparison (sentence embedding vs bag-of-words). "Time flies like an
+   arrow" vs "Fruit flies like a banana" as opening example. Three failure
+   modes: word order, negation, polysemy.
+2. **What's inside a sentence embedding**: MiniLM-L6-v2 overview (22M
+   params, 6 layers, mean-pooling → 384-dim). Pre-computed comparison
+   table covering synonyms, negation, word order, polysemy, bank
+   ambiguity. Honest about remaining weakness: "dog bit man" ≈ "man bit
+   dog" (0.979).
+3. **Chunking**: 18-sentence animal survival document. Slider for
+   sentences-per-chunk (1–6). Shows precision/context tradeoff — sweet
+   spot at 2–4 sentences.
+4. **The retrieval loop**: brute-force search on 2-sentence chunks.
+   Top-k slider (1–6). Same corpus as §3 but pre-chunked at the sweet
+   spot.
+5. **The assembled prompt**: shows the exact RAG prompt (context + query)
+   that would be sent to a language model. No live API call — shows the
+   prompt as text so the reader sees the full pipeline.
+6. **What can go wrong**: three interactive failure modes — chunk boundary
+   splits, domain mismatch (MiniLM scores "Big Mac" higher than
+   "multiply-accumulate" for "MAC energy at 5nm"), vocabulary mismatch.
 
-### Sections (draft):
-1. **Word embeddings aren't enough**: bag-of-words loses word order,
-   can't capture "not good" vs "good". Need sentence/paragraph embeddings.
-2. **Sentence embeddings**: load a small model (all-MiniLM-L6-v2, 80MB,
-   CPU-only). Compare sentence similarity — show that it captures meaning
-   where bag-of-words fails.
-3. **Chunking**: same document, different chunk sizes. Show that chunk
-   size is a design choice (too small = no context, too big = dilutes).
-   Interactive slider for chunk size with retrieval quality metric.
-4. **The retrieval loop**: embed query → search index → top-k chunks.
-   Build a small FAISS/IVF index on chunked documents. Interactive query.
-5. **Retrieval + generation**: stuff retrieved chunks into a prompt.
-   Show the assembled prompt (and optionally call Claude API to complete).
-6. **What can go wrong**: retrieved chunk is irrelevant, chunk boundary
-   splits a key sentence, embedding model doesn't understand domain jargon.
-   Interactive examples of each failure mode.
-
-### Dependencies (heavy):
-- sentence-transformers → pulls PyTorch (~800MB). Container roughly
-  doubles. Keep out of Docker build until ready.
-- Optionally: anthropic SDK for live generation step.
-- Alternative: use a lighter embedding model (e.g. onnxruntime + quantized
-  MiniLM) to avoid PyTorch. Worth investigating.
+### Dependencies:
+- onnxruntime (~17MB wheel) + MiniLM ONNX model (~90MB). No PyTorch.
+  Container increase ~100MB (was ~900MB → ~1000MB).
+- Model pre-downloaded during Docker build (like GloVe).
 
 ---
 
