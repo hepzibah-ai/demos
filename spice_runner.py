@@ -43,7 +43,6 @@ def _run_ngspice(deck: str, workdir: str) -> str:
 
 
 def run_balancer(
-    Vbat: float = 1.2,
     Vpe: float = 0.4,
     Vgs: float = 1.5,
     W_um: float = 300.0,
@@ -86,16 +85,18 @@ def run_balancer(
     clk1_pw = Thalf - Tdead       # pulse width
     clk2_delay = Thalf            # delay for second clock
 
+    Vstring = 2 * Vpe
     I_bot_after = Istring_mA - Imismatch_mA
     _csv_placeholder = "__OUTPUT_CSV__"
 
     deck = f"""\
 * SC balancer with physical PE loads
 * PTM 90nm BSIM4 NMOS switches
+* String supply modeled as ideal regulator: Vstring = 2 × Vpe
 .include {PTM_MODEL}
 
-* === Battery (ideal — represents string supply output) ===
-Vbat vstring 0 DC {Vbat}
+* === String supply (ideal regulator output) ===
+Vstr vstring 0 DC {Vstring}
 
 * === Top PE: C + I + R from vstring to vmid ===
 * C = well capacitance, I = DC load, R = Norton-equivalent compute load
@@ -112,8 +113,8 @@ Rpe_bot vmid 0 {Rpe_ohm}
 * === Flying capacitor ===
 Cfly cfly_p cfly_n {Cfly_nF}n
 
-* === Balancer switches (1:1 from battery to bottom segment) ===
-* Phase 1 (clk1): S1+S2 charge Cfly from battery (vstring→GND)
+* === Balancer switches (1:1 from string top to bottom segment) ===
+* Phase 1 (clk1): S1+S2 charge Cfly from vstring (vstring→GND)
 * Phase 2 (clk2): S3+S4 discharge Cfly to bottom segment (vmid→GND)
 Ms1  vstring clk1 cfly_p 0  nmos w={W_um}u l={L_nm}n
 Ms2  cfly_n  clk1 0      0  nmos w={W_um}u l={L_nm}n
@@ -132,7 +133,7 @@ Vclk2 clk2 0 PULSE(0 {Vgs} {clk2_delay} 0.1n 0.1n {clk1_pw} {T})
 
 .control
 run
-wrdata {_csv_placeholder} v(vstring) v(vmid) v(cfly_p) v(cfly_n) i(Vbat)
+wrdata {_csv_placeholder} v(vstring) v(vmid) v(cfly_p) v(cfly_n) i(Vstr)
 quit
 .endc
 
@@ -155,6 +156,6 @@ quit
         "v_top": v_string - v_mid,   # voltage across top PE
         "v_bot": v_mid,               # voltage across bottom PE (= Vmid)
         "v_cfly": sigs[2] - sigs[3],  # v(cfly_p) - v(cfly_n)
-        "i_bat_mA": -sigs[4] * 1e3,
+        "i_string_mA": -sigs[4] * 1e3,
         "step_time_ns": step_time * 1e9,
     }

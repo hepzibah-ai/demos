@@ -151,10 +151,6 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    ui_vin = mo.ui.slider(
-        start=0.5, stop=3.0, step=0.1, value=1.2,
-        label="Battery voltage (V)",
-    )
     ui_vpe = mo.ui.slider(
         start=0.3, stop=0.5, step=0.01, value=0.4,
         label="Voltage per PE (V)",
@@ -169,10 +165,10 @@ def _(mo):
     )
     mo.vstack([
         mo.md("### Application"),
-        mo.hstack([ui_vin, ui_vpe], justify="start"),
+        ui_vpe,
         mo.hstack([ui_istring, ui_imismatch], justify="start"),
     ])
-    return ui_imismatch, ui_istring, ui_vin, ui_vpe
+    return ui_imismatch, ui_istring, ui_vpe
 
 
 @app.cell
@@ -226,7 +222,7 @@ def _(dev_ui, device_from_sliders, device_summary_md, mo):
 
 
 @app.cell(hide_code=True)
-def _(dev_ui, mo, ui_cfly, ui_fsw, ui_vin, ui_w_sw):
+def _(dev_ui, mo, ui_cfly, ui_fsw, ui_vpe, ui_w_sw):
     # Ron × Cfly time constant
     _W = ui_w_sw.value * 1e-6
     _L = dev_ui["lg"].value * 1e-9
@@ -238,22 +234,24 @@ def _(dev_ui, mo, ui_cfly, ui_fsw, ui_vin, ui_w_sw):
 
     _Vgs = dev_ui["vgs"].value
     _Vth = dev_ui["vth"].value
-    _Vgs_eff_hi = _Vgs - ui_vin.value  # worst-case high-side Vgs
+    _Vstring = 2 * ui_vpe.value
+    _Vgs_eff_hi = _Vgs - _Vstring  # worst-case high-side Vgs
 
     mo.md(f"""
     ### Design Point
 
     | Parameter | Value | Notes |
     |-----------|-------|-------|
+    | Vstring | {_Vstring:.2f} V | 2 × Vpe (ideal string regulator) |
     | Switch Ron | {_Ron*1e3:.1f} mΩ | W={ui_w_sw.value}µm, L={dev_ui['lg'].value}nm |
     | Ron × Cfly | **{_tau*1e9:.2f} ns** | Target ≤ 1 ns for full charge transfer |
     | Half-period | {_Thalf*1e9:.1f} ns | {ui_fsw.value} MHz |
     | τ / T_half | {_tau/_Thalf*100:.0f}% | Want ≪ 100% |
-    | Cfly charge/cycle | {_Cfly * 0.4 * 1e12:.0f} pC | At Vpe = 0.4V |
+    | Cfly charge/cycle | {_Cfly * ui_vpe.value * 1e12:.0f} pC | At Vpe = {ui_vpe.value}V |
     | Max Imis at 100mV error | {_Cfly * 0.1 * ui_fsw.value * 1e6 * 1e3:.0f} mA | Cfly × Verror × fsw |
     | | | |
-    | Gate drive (Vgs) | {_Vgs:.1f} V | {"⚠️ Need bootstrap" if _Vgs < ui_vin.value + _Vth else "OK"} |
-    | High-side Vgs,eff | {_Vgs_eff_hi:.2f} V | Vgs − Vbat; need > Vth ({_Vth:.2f}V) |
+    | Gate drive (Vgs) | {_Vgs:.1f} V | {"⚠️ Need bootstrap" if _Vgs < _Vstring + _Vth else "OK"} |
+    | High-side Vgs,eff | {_Vgs_eff_hi:.2f} V | Vgs − Vstring; need > Vth ({_Vth:.2f}V) |
     """)
     return
 
@@ -264,9 +262,10 @@ def _(mo):
     ## SPICE Transient Simulation
 
     [ASU PTM 90nm](https://mec.umn.edu/ptm) BSIM4 NMOS model.
-    Each PE is a capacitor + current source. The simulation starts
-    balanced, then the bottom PE's current steps down to create a
-    mismatch. Watch how the balancer (fails to) respond.
+    The string supply is ideal (Vstring = 2 × Vpe). Each PE is
+    modeled as C + I + R (capacitance, DC current, Norton-equivalent
+    compute load). The simulation starts balanced, then the bottom
+    PE's current steps down to create a mismatch.
     """)
     return
 
@@ -283,12 +282,10 @@ def _(
     ui_imismatch,
     ui_istring,
     ui_rpe,
-    ui_vin,
     ui_vpe,
     ui_w_sw,
 ):
     _wf = run_balancer(
-        Vbat=ui_vin.value,
         Vpe=ui_vpe.value,
         Vgs=dev_ui["vgs"].value,
         W_um=ui_w_sw.value,
@@ -324,17 +321,18 @@ def _(
     _axes[1].set_ylabel("Vcfly (mV)")
     _axes[1].grid(True, alpha=0.3)
 
-    # Battery current (clipped for visibility)
-    _i_clip = np.clip(_wf["i_bat_mA"], -500, 500)
+    # String supply current (clipped for visibility)
+    _i_clip = np.clip(_wf["i_string_mA"], -500, 500)
     _axes[2].plot(_t, _i_clip, color="#f28e2b", linewidth=0.8)
     _axes[2].axvline(_step, color="k", ls=":", alpha=0.5)
-    _axes[2].set_ylabel("I_bat (mA)")
+    _axes[2].set_ylabel("I_string (mA)")
     _axes[2].set_xlabel("Time (ns)")
     _axes[2].grid(True, alpha=0.3)
 
     _fig.suptitle(
-        f"1:1 SC Balancer — W={ui_w_sw.value}µm, Cfly={ui_cfly.value}nF, "
-        f"Cpe={ui_cpe.value}nF, {ui_fsw.value}MHz\n"
+        f"1:1 SC Balancer — Vstring={2*ui_vpe.value:.1f}V, "
+        f"W={ui_w_sw.value}µm, Cfly={ui_cfly.value}nF, "
+        f"{ui_fsw.value}MHz\n"
         f"Bottom PE steps from {ui_istring.value}mA to "
         f"{ui_istring.value - ui_imismatch.value}mA at t={_step:.0f}ns",
         fontsize=10,
@@ -365,9 +363,9 @@ def _(mo, ui_cfly, ui_fsw, ui_vpe):
     - Max current (Verror = Vpe = {ui_vpe.value}V): **{_I_max:.0f} mA**
 
     The SPICE waveforms above confirm this: the PE voltages drift
-    significantly before the balancer can respond, and the 1:1 ratio
-    from a {ui_vpe.value*2:.1f}V+ battery wastes most of its energy as
-    ratio loss.
+    significantly before the balancer can respond. The 1:1 topology
+    charges Cfly from Vstring (= 2×Vpe) and dumps into Vmid (≈ Vpe),
+    so half the transferred energy is wasted as ratio loss.
 
     **Solution: a 3:2 step-up** provides built-in overdrive, allowing
     the balancer to source current near zero error voltage. This is
