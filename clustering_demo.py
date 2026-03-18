@@ -333,13 +333,21 @@ def _(mo):
         """
         ## §3 — Seeing the clusters: t-SNE vs PCA
 
-        PCA (notebook 6) preserves global structure but distorts local
-        neighborhoods. **t-SNE** does the opposite: it preserves which
-        points are close to each other, at the cost of distorting
-        distances between distant points.
+        PCA projects onto the directions of maximum variance — a global,
+        linear operation. It's fast (one SVD) but in 2D it often squashes
+        clusters that are well-separated in 50D on top of each other.
 
-        Toggle between projections on the same data. PCA spreads things
-        out; t-SNE reveals tight clusters.
+        **t-SNE** (t-distributed Stochastic Neighbor Embedding) works
+        differently: for every pair of points, compute a similarity in
+        the original high-D space, then find a 2D layout where those
+        pairwise similarities are preserved as well as possible. It
+        optimizes iteratively (gradient descent, ~1000 steps), so it's
+        much slower than PCA — but it keeps **neighbors as neighbors**,
+        which is exactly what you want when visualizing clusters.
+
+        The tradeoff: t-SNE distorts global distances. Two clusters far
+        apart on a t-SNE plot might actually be close in 50D, and the
+        axes have no meaning. Toggle below to see the difference.
         """
     )
 
