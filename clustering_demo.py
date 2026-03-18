@@ -573,9 +573,14 @@ def _(nprobe_slider, ivf_query_input, glove_model, curated_words,
 
         _out = mo.vstack([
             mo.image(_buf.read(), width=650),
-            mo.md(f"""**Recall: {_recall:.0%}** (IVF top-10 vs brute-force top-10).
-Searched **{_np.sum(_searched_mask)}** of {len(curated_words)} vectors
-({_np.sum(_searched_mask)/len(curated_words):.0%}).
+            mo.md(f"""**Recall: {_recall:.0%}** — searched **{_np.sum(_searched_mask)}** of {len(curated_words)} vectors ({_np.sum(_searched_mask)/len(curated_words):.0%}).
+
+**Recall** = "of the results we *should* have found, how many did we
+*actually* find?" Brute force always gets the right answer (recall =
+100%); approximate methods trade recall for speed. The ✓/✗ column
+shows which brute-force top-10 results IVF missed — those are **false
+negatives** (relevant results we skipped because they were in cells we
+didn't search).
 
 | IVF result | Similarity | In brute-force top-10? |
 |------------|------------|----------------------|
