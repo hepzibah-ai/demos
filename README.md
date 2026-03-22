@@ -69,3 +69,8 @@ Linode 172.105.0.10
         ├── server.py          # FastAPI multi-notebook server
         └── docker-compose.yml
 ```
+
+## Organization
+
+See [general](https://github.com/hepzibah-ai/general) for the full
+organization repo directory.
