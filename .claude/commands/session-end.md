@@ -13,6 +13,7 @@ Prepare for handoff before ending a session.
 
 - [ ] Update `technical-debt.md` with status changes, new items, or completed work
 - [ ] If new notebook added, verify it's registered in `deploy/server.py`
+- [ ] If notebooks were added, moved, renamed, or retired this session, update the matching row in `~/hack/general/knowledge-base/demos/public.md`
 
 ### 3. Verification
 

@@ -34,4 +34,17 @@ Read `technical-debt.md` for the full notebook plan and roadmap.
 3. If new pip deps needed, add to `deploy/Dockerfile`
 4. If heavy downloads needed (models, data), add `RUN python -c "..."` pre-download step
 5. Update `technical-debt.md` status table
-6. Push, then rebuild on Linode
+6. Add a row to `~/hack/general/knowledge-base/demos/public.md`
+7. Push, then rebuild on Linode
+
+## Knowledge base (cross-cutting synthesis)
+
+A Karpathy-style LLM-maintained wiki lives at `~/hack/general/knowledge-base/`.
+Its `demos/` sub-wiki is the registry of all marimo notebooks across repos,
+organised by audience (public / engineering / customer / internal). Public
+notebooks from this repo are indexed at `demos/public.md` — step 6 above.
+
+When a notebook is added, moved, renamed, or retired here, update the
+matching row in `general/knowledge-base/demos/public.md` so the registry
+doesn't drift. See `~/hack/general/knowledge-base/CLAUDE.md` for the KB's
+conventions.
